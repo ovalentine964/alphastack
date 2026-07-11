@@ -1,0 +1,306 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>前端设计生成流程</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --fg: #172033;
+    --muted: #5b6475;
+    --line: #64748b;
+    --neutral: #e2e8f0;
+    --input: #bfdbfe;
+    --process: #c7d2fe;
+    --storage: #99f6e4;
+    --external: #fde68a;
+    --risk: #fecaca;
+    --blue: #3b82f6;
+    --purple: #8b5cf6;
+    --green: #10b981;
+    --pink: #ec4899;
+    --amber: #f59e0b;
+    --sky: #0ea5e9;
+    --teal: #14b8a6;
+    --rose: #f43f5e;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  main {
+    max-width: 1200px;
+    margin: 32px auto;
+    padding: 0 20px;
+  }
+  svg { width: 100%; height: auto; display: block; }
+</style>
+<main>
+<svg viewBox="0 0 1160 780" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f43f5e"/>
+    </marker>
+  </defs>
+
+  <!-- ===== ZONE 1: Input ===== -->
+  <rect x="20" y="20" width="240" height="740" rx="16" fill="#eff6ff" stroke="#93c5fd" stroke-width="1" stroke-dasharray="6 4" opacity="0.5"/>
+  <text x="140" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="#2563eb" letter-spacing="1">INPUT</text>
+
+  <!-- User icon + Text Description -->
+  <rect x="50" y="70" width="180" height="56" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="82" y="93" font-size="20">👤</text>
+  <text x="140" y="93" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a5f">用户输入</text>
+  <text x="140" y="113" text-anchor="middle" font-size="11" fill="#3b82f6">自然语言描述设计需求</text>
+
+  <!-- Intent Recognition -->
+  <rect x="50" y="155" width="180" height="56" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text x="82" y="178" font-size="20">🔍</text>
+  <text x="140" y="178" text-anchor="middle" font-size="14" font-weight="600" fill="#92400e">意图识别</text>
+  <text x="140" y="198" text-anchor="middle" font-size="11" fill="#b45309">NLU / 关键词检测</text>
+
+  <!-- Clarification -->
+  <rect x="50" y="240" width="180" height="48" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="82" y="268" font-size="18">❓</text>
+  <text x="140" y="268" text-anchor="middle" font-size="13" font-weight="600" fill="#854d0e">澄清追问</text>
+
+  <!-- Parse Requirements -->
+  <rect x="50" y="315" width="180" height="56" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="82" y="338" font-size="20">📋</text>
+  <text x="140" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a5f">解析需求</text>
+  <text x="140" y="358" text-anchor="middle" font-size="11" fill="#3b82f6">提取设计约束与目标</text>
+
+  <!-- ===== ZONE 2: Design System ===== -->
+  <rect x="290" y="20" width="250" height="360" rx="16" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1" stroke-dasharray="6 4" opacity="0.5"/>
+  <text x="415" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="#7c3aed" letter-spacing="1">DESIGN SYSTEM</text>
+
+  <!-- Core Design System -->
+  <rect x="320" y="70" width="190" height="56" rx="12" fill="#ede9fe" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="352" y="93" font-size="20">📐</text>
+  <text x="415" y="93" text-anchor="middle" font-size="14" font-weight="600" fill="#4c1d95">核心设计系统</text>
+  <text x="415" y="113" text-anchor="middle" font-size="11" fill="#7c3aed">一次生成 · 全局生效</text>
+
+  <!-- Design Tokens -->
+  <rect x="320" y="150" width="88" height="60" rx="10" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="364" y="173" text-anchor="middle" font-size="12" font-weight="600" fill="#4c1d95">🎨 色彩</text>
+  <text x="364" y="193" text-anchor="middle" font-size="10" fill="#7c3aed">主色·辅色·强调</text>
+
+  <rect x="422" y="150" width="88" height="60" rx="10" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="466" y="173" text-anchor="middle" font-size="12" font-weight="600" fill="#4c1d95">✒️ 字体</text>
+  <text x="466" y="193" text-anchor="middle" font-size="10" fill="#7c3aed">标题·正文·代码</text>
+
+  <rect x="320" y="222" width="88" height="60" rx="10" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="364" y="245" text-anchor="middle" font-size="12" font-weight="600" fill="#4c1d95">📏 间距</text>
+  <text x="364" y="265" text-anchor="middle" font-size="10" fill="#7c3aed">网格·圆角·阴影</text>
+
+  <rect x="422" y="222" width="88" height="60" rx="10" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="466" y="245" text-anchor="middle" font-size="12" font-weight="600" fill="#4c1d95">🧱 组件</text>
+  <text x="466" y="265" text-anchor="middle" font-size="10" fill="#7c3aed">按钮·输入·卡片</text>
+
+  <!-- Component Generation -->
+  <rect x="320" y="305" width="190" height="56" rx="12" fill="#d1fae5" stroke="#10b981" stroke-width="2"/>
+  <text x="352" y="328" font-size="20">🧩</text>
+  <text x="415" y="328" text-anchor="middle" font-size="14" font-weight="600" fill="#064e3b">组件生成</text>
+  <text x="415" y="348" text-anchor="middle" font-size="11" fill="#059669">Headless UI + 样式映射</text>
+
+  <!-- ===== ZONE 3: Assembly ===== -->
+  <rect x="570" y="20" width="250" height="360" rx="16" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1" stroke-dasharray="6 4" opacity="0.5"/>
+  <text x="695" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="#db2777" letter-spacing="1">ASSEMBLY</text>
+
+  <!-- Component Details -->
+  <rect x="600" y="70" width="190" height="48" rx="10" fill="#fce7f3" stroke="#f472b6" stroke-width="1.5"/>
+  <text x="632" y="99" font-size="16">✨</text>
+  <text x="695" y="99" text-anchor="middle" font-size="13" font-weight="600" fill="#831843">交互状态 · ARIA · 响应式</text>
+
+  <!-- Page Assembly -->
+  <rect x="600" y="140" width="190" height="56" rx="12" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="632" y="163" font-size="20">📄</text>
+  <text x="695" y="163" text-anchor="middle" font-size="14" font-weight="600" fill="#831843">页面组装</text>
+  <text x="695" y="183" text-anchor="middle" font-size="11" fill="#db2777">完整 HTML 单文件</text>
+
+  <!-- Sub-components (optional) -->
+  <rect x="600" y="220" width="90" height="50" rx="10" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="645" y="241" text-anchor="middle" font-size="11" font-weight="600" fill="#9d174d">组件 A</text>
+  <text x="645" y="258" text-anchor="middle" font-size="10" fill="#be185d">可选扩展</text>
+
+  <rect x="700" y="220" width="90" height="50" rx="10" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="745" y="241" text-anchor="middle" font-size="11" font-weight="600" fill="#9d174d">组件 B</text>
+  <text x="745" y="258" text-anchor="middle" font-size="10" fill="#be185d">可选扩展</text>
+
+  <rect x="600" y="280" width="90" height="50" rx="10" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="645" y="301" text-anchor="middle" font-size="11" font-weight="600" fill="#9d174d">组件 C</text>
+  <text x="645" y="318" text-anchor="middle" font-size="10" fill="#be185d">可选扩展</text>
+
+  <rect x="700" y="280" width="90" height="50" rx="10" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="745" y="301" text-anchor="middle" font-size="11" font-weight="600" fill="#9d174d">组件 D</text>
+  <text x="745" y="318" text-anchor="middle" font-size="10" fill="#be185d">可选扩展</text>
+
+  <!-- Auto layout -->
+  <rect x="600" y="345" width="190" height="28" rx="8" fill="#fce7f3" stroke="#f472b6" stroke-width="1"/>
+  <text x="695" y="364" text-anchor="middle" font-size="11" font-weight="600" fill="#831843">📦 自动布局 · 间距计算</text>
+
+  <!-- ===== ZONE 4: Preview & Iterate ===== -->
+  <rect x="850" y="20" width="290" height="740" rx="16" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1" stroke-dasharray="6 4" opacity="0.5"/>
+  <text x="995" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="#059669" letter-spacing="1">PREVIEW & ITERATE</text>
+
+  <!-- Canvas Preview -->
+  <rect x="880" y="70" width="230" height="56" rx="12" fill="#d1fae5" stroke="#10b981" stroke-width="2"/>
+  <text x="912" y="93" font-size="20">🖥️</text>
+  <text x="995" y="93" text-anchor="middle" font-size="14" font-weight="600" fill="#064e3b">Canvas 实时预览</text>
+  <text x="995" y="113" text-anchor="middle" font-size="11" fill="#059669">iframe 安全沙箱渲染</text>
+
+  <!-- Feedback Loop -->
+  <rect x="880" y="155" width="230" height="56" rx="12" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text x="912" y="178" font-size="20">💬</text>
+  <text x="995" y="178" text-anchor="middle" font-size="14" font-weight="600" fill="#92400e">用户反馈</text>
+  <text x="995" y="198" text-anchor="middle" font-size="11" fill="#b45309">查看 → 提出修改意见</text>
+
+  <!-- Decision -->
+  <polygon points="995,240 1060,275 995,310 930,275" fill="#fef9c3" stroke="#eab308" stroke-width="2"/>
+  <text x="995" y="272" text-anchor="middle" font-size="12" font-weight="600" fill="#854d0e">满意？</text>
+  <text x="995" y="287" text-anchor="middle" font-size="10" fill="#a16207">Review</text>
+
+  <!-- Yes path -->
+  <rect x="880" y="340" width="230" height="56" rx="12" fill="#d1fae5" stroke="#10b981" stroke-width="2"/>
+  <text x="912" y="363" font-size="20">✅</text>
+  <text x="995" y="363" text-anchor="middle" font-size="14" font-weight="600" fill="#064e3b">最终交付</text>
+  <text x="995" y="383" text-anchor="middle" font-size="11" fill="#059669">HTML / PNG / 代码导出</text>
+
+  <!-- Modify branches -->
+  <rect x="880" y="420" width="110" height="48" rx="10" fill="#fef9c3" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="935" y="440" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">🎨 调整色彩</text>
+  <text x="935" y="457" text-anchor="middle" font-size="10" fill="#b45309">修改 Tokens</text>
+
+  <rect x="1000" y="420" width="110" height="48" rx="10" fill="#fef9c3" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="1055" y="440" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">📐 调整布局</text>
+  <text x="1055" y="457" text-anchor="middle" font-size="10" fill="#b45309">修改结构</text>
+
+  <rect x="880" y="478" width="110" height="48" rx="10" fill="#fef9c3" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="935" y="498" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">➕ 新增功能</text>
+  <text x="935" y="515" text-anchor="middle" font-size="10" fill="#b45309">扩展组件</text>
+
+  <rect x="1000" y="478" width="110" height="48" rx="10" fill="#fef9c3" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="1055" y="498" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">🔄 重新生成</text>
+  <text x="1055" y="515" text-anchor="middle" font-size="10" fill="#b45309">全新方案</text>
+
+  <!-- ===== Connecting Arrows ===== -->
+
+  <!-- User → Intent -->
+  <line x1="140" y1="126" x2="140" y2="155" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <!-- Intent → Clarification (dashed) -->
+  <line x1="140" y1="211" x2="140" y2="240" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+
+  <!-- Clarification → back to User (curved) -->
+  <path d="M 60,264 C 20,264 20,98 50,98" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+
+  <!-- Intent → Parse -->
+  <line x1="140" y1="211" x2="140" y2="315" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <!-- Parse → Design System -->
+  <line x1="230" y1="343" x2="320" y2="98" stroke="#8b5cf6" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Design System → Tokens -->
+  <line x1="415" y1="126" x2="364" y2="150" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="415" y1="126" x2="466" y2="150" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="415" y1="126" x2="364" y2="222" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="415" y1="126" x2="466" y2="222" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Tokens → Component Generation -->
+  <line x1="364" y1="210" x2="364" y2="305" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="466" y1="210" x2="466" y2="305" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="364" y1="282" x2="364" y2="305" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="466" y1="282" x2="466" y2="305" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- Component Gen → Assembly -->
+  <line x1="510" y1="333" x2="600" y2="168" stroke="#db2777" stroke-width="2" marker-end="url(#arrow-rose)"/>
+
+  <!-- Component Gen → Sub-components -->
+  <line x1="510" y1="333" x2="600" y2="245" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+  <!-- Sub-components → Page Assembly -->
+  <line x1="690" y1="245" x2="695" y2="196" stroke="#db2777" stroke-width="1" marker-end="url(#arrow-rose)"/>
+  <line x1="745" y1="270" x2="720" y2="196" stroke="#db2777" stroke-width="1" marker-end="url(#arrow-rose)"/>
+  <line x1="645" y1="305" x2="670" y2="196" stroke="#db2777" stroke-width="1" marker-end="url(#arrow-rose)"/>
+
+  <!-- Assembly → Preview -->
+  <line x1="790" y1="168" x2="880" y2="98" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-green)"/>
+
+  <!-- Preview → Feedback -->
+  <line x1="995" y1="126" x2="995" y2="155" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow-amber)"/>
+
+  <!-- Feedback → Decision -->
+  <line x1="995" y1="211" x2="995" y2="240" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow-amber)"/>
+
+  <!-- Decision → Yes → Final -->
+  <line x1="995" y1="310" x2="995" y2="340" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="1003" y="330" font-size="11" fill="#059669" font-weight="600">是 ✓</text>
+
+  <!-- Decision → No → Modify -->
+  <line x1="1060" y1="275" x2="880" y2="444" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+  <text x="1080" y="370" font-size="11" fill="#b45309" font-weight="600">否 →</text>
+  <text x="1080" y="385" font-size="10" fill="#b45309">修改方案</text>
+
+  <!-- Modify → back to Assembly (loop arrows) -->
+  <path d="M 935,468 C 860,468 840,168 790,168" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+  <path d="M 1055,468 C 1120,468 1130,168 790,168" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+  <path d="M 935,526 C 860,526 830,168 790,168" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+  <path d="M 1055,526 C 1120,526 1130,168 790,168" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-amber)"/>
+
+  <!-- ===== BOTTOM: Key Features ===== -->
+  <rect x="290" y="410" width="530" height="340" rx="16" fill="#f0fdf4" stroke="#86efac" stroke-width="1" opacity="0.6"/>
+  <text x="555" y="442" text-anchor="middle" font-size="14" font-weight="700" fill="#166534" letter-spacing="1">✨ 关键特性 KEY FEATURES</text>
+
+  <!-- Feature cards -->
+  <rect x="310" y="460" width="240" height="56" rx="10" fill="#dcfce7" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="330" y="484" font-size="16">⚡</text>
+  <text x="430" y="484" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">一次性生成完整设计系统</text>
+  <text x="430" y="504" text-anchor="middle" font-size="11" fill="#15803d">色彩 · 字体 · 间距 · 组件一次到位</text>
+
+  <rect x="560" y="460" width="240" height="56" rx="10" fill="#dcfce7" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="580" y="484" font-size="16">🔗</text>
+  <text x="680" y="484" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">Headless UI + Tailwind 分离</text>
+  <text x="680" y="504" text-anchor="middle" font-size="11" fill="#15803d">结构与样式解耦 · 易于定制</text>
+
+  <rect x="310" y="530" width="240" height="56" rx="10" fill="#dcfce7" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="330" y="554" font-size="16">📱</text>
+  <text x="430" y="554" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">组件级响应式设计</text>
+  <text x="430" y="574" text-anchor="middle" font-size="11" fill="#15803d">每个组件独立适配多端</text>
+
+  <rect x="560" y="530" width="240" height="56" rx="10" fill="#dcfce7" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="580" y="554" font-size="16">♿</text>
+  <text x="680" y="554" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">内置无障碍支持</text>
+  <text x="680" y="574" text-anchor="middle" font-size="11" fill="#15803d">ARIA 标签 · 键盘导航 · 对比度</text>
+
+  <rect x="310" y="600" width="240" height="56" rx="10" fill="#dcfce7" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="330" y="624" font-size="16">🔄</text>
+  <text x="430" y="624" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">快速迭代循环</text>
+  <text x="430" y="644" text-anchor="middle" font-size="11" fill="#15803d">预览 → 反馈 → 修改 → 再预览</text>
+
+  <rect x="560" y="600" width="240" height="56" rx="10" fill="#dcfce7" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="580" y="624" font-size="16">🧬</text>
+  <text x="680" y="624" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">设计变更全局联动</text>
+  <text x="680" y="644" text-anchor="middle" font-size="11" fill="#15803d">改 Token → 所有组件自动更新</text>
+
+  <!-- Final delivery box -->
+  <rect x="310" y="672" width="490" height="60" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <text x="330" y="698" font-size="18">📦</text>
+  <text x="555" y="698" text-anchor="middle" font-size="14" font-weight="700" fill="#064e3b">交付物：单个自包含 HTML 文件</text>
+  <text x="555" y="718" text-anchor="middle" font-size="12" fill="#059669">内联 CSS + 内联 JS · 无外部依赖 · 可直接在 Canvas 中预览</text>
+
+</svg>
+</main>
