@@ -16,12 +16,12 @@
 
 **Linux / macOS:**
 ```bash
-curl -sSL https://alphastack.app/install | bash
+curl -sSL https://ovalentine964.github.io/alphastack/install | bash
 ```
 
 **Windows (PowerShell as Admin):**
 ```powershell
-irm https://alphastack.app/install.ps1 | iex
+irm https://ovalentine964.github.io/alphastack/install.ps1 | iex
 ```
 
 **Desktop App (Pre-built):**
@@ -35,7 +35,7 @@ irm https://alphastack.app/install.ps1 | iex
 
 **Build for your phone (Flutter — works on ALL phones):**
 ```bash
-curl -sSL https://alphastack.app/install | bash -s -- mobile
+curl -sSL https://ovalentine964.github.io/alphastack/install | bash -s -- mobile
 ```
 
 **Download pre-built:**

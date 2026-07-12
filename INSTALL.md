@@ -8,17 +8,17 @@
 
 **Desktop — Linux / macOS:**
 ```bash
-curl -sSL https://alphastack.app/install | bash
+curl -sSL https://ovalentine964.github.io/alphastack/install | bash
 ```
 
 **Desktop — Windows (PowerShell as Admin):**
 ```powershell
-irm https://alphastack.app/install.ps1 | iex
+irm https://ovalentine964.github.io/alphastack/install.ps1 | iex
 ```
 
 **Mobile — All Phones (Android + iOS):**
 ```bash
-curl -sSL https://alphastack.app/install | bash -s -- mobile
+curl -sSL https://ovalentine964.github.io/alphastack/install | bash -s -- mobile
 ```
 
 ---
