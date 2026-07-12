@@ -4,13 +4,22 @@
 
 **Latest Release:** [GitHub Releases](https://github.com/ovalentine964/alphastack/releases/latest)
 
-| Platform | File | Size |
-|----------|------|------|
-| 🪟 **Windows** | `AlphaStack-Setup-x.x.x.exe` | ~15 MB |
-| 🍎 **macOS** | `AlphaStack-x.x.x.dmg` | ~12 MB |
-| 🐧 **Linux** | `AlphaStack-x.x.x.AppImage` | ~15 MB |
-| 📱 **Android** | `AlphaStack-x.x.x.apk` | ~25 MB |
-| 🌐 **Web** | [https://alphastack.app](https://alphastack.app) | — |
+### Quick Install (One Command)
+
+**Desktop — Linux / macOS:**
+```bash
+curl -sSL https://alphastack.app/install | bash
+```
+
+**Desktop — Windows (PowerShell as Admin):**
+```powershell
+irm https://alphastack.app/install.ps1 | iex
+```
+
+**Mobile — All Phones (Android + iOS):**
+```bash
+curl -sSL https://alphastack.app/install | bash -s -- mobile
+```
 
 ---
 

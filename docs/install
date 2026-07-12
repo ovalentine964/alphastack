@@ -1,0 +1,4 @@
+#!/bin/bash
+# AlphaStack Installer
+# Redirects to the actual install script
+curl -sSL "https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.sh" | bash "$@"
