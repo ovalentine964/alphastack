@@ -4,6 +4,54 @@
 
 set -e
 
+# Check if mobile build requested
+if [ "$1" = "mobile" ]; then
+    echo "╔══════════════════════════════════════════╗"
+    echo "║    AlphaStack Mobile Installer v0.1.0    ║"
+    echo "╚══════════════════════════════════════════╝"
+    echo ""
+    
+    # Check Flutter
+    if ! command -v flutter &> /dev/null; then
+        echo "Installing Flutter..."
+        if command -v brew &> /dev/null; then
+            brew install flutter
+        elif command -v snap &> /dev/null; then
+            sudo snap install flutter
+        else
+            git clone https://github.com/flutter/flutter.git -b stable
+            export PATH="$PATH:$(pwd)/flutter/bin"
+        fi
+    fi
+    
+    git clone https://github.com/ovalentine964/alphastack.git
+    cd alphastack/apps/mobile
+    flutter pub get
+    
+    echo ""
+    echo "Building for your phone..."
+    echo ""
+    
+    # Detect platform
+    case "$(uname -s)" in
+        Darwin*)
+            echo "🍎 Building for iOS..."
+            flutter build ios --release
+            echo "✅ iOS build complete!"
+            echo "Open ios/Runner.xcarchive in Xcode to deploy to your iPhone"
+            ;;
+        *)
+            echo "📱 Building for Android..."
+            flutter build apk --release
+            echo "✅ Android APK built!"
+            echo "APK location: build/app/outputs/flutter-apk/app-release.apk"
+            echo "Transfer this file to your phone and install"
+            ;;
+    esac
+    
+    exit 0
+fi
+
 echo "╔══════════════════════════════════════════╗"
 echo "║       AlphaStack Installer v0.1.0        ║"
 echo "╚══════════════════════════════════════════╝"

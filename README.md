@@ -10,9 +10,16 @@
 
 **Latest Release:** [GitHub Releases](https://github.com/ovalentine964/alphastack/releases/latest)
 
-### One-Command Install
+---
 
-**Linux / macOS:**
+### 🖥️ Desktop (Windows / macOS / Linux) — One Command
+
+**Linux:**
+```bash
+curl -sSL https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.sh | bash
+```
+
+**macOS:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.sh | bash
 ```
@@ -22,16 +29,40 @@ curl -sSL https://raw.githubusercontent.com/ovalentine964/alphastack/main/instal
 irm https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.ps1 | iex
 ```
 
-**Android:**
-Download APK: https://github.com/ovalentine964/alphastack/releases/latest
+Or download pre-built installers:
+- 🪟 [Windows .exe](https://github.com/ovalentine964/alphastack/releases/latest)
+- 🍎 [macOS .dmg](https://github.com/ovalentine964/alphastack/releases/latest)
+- 🐧 [Linux .AppImage](https://github.com/ovalentine964/alphastack/releases/latest)
 
-### Desktop App (Pre-built)
+---
 
-| Platform | Download |
-|----------|----------|
-| 🪟 **Windows** | [AlphaStack-Setup.exe](https://github.com/ovalentine964/alphastack/releases/latest) |
-| 🍎 **macOS** | [AlphaStack.dmg](https://github.com/ovalentine964/alphastack/releases/latest) |
-| 🐧 **Linux** | [AlphaStack.AppImage](https://github.com/ovalentine964/alphastack/releases/latest) |
+### 📱 Mobile (All Phones — Android + iOS) — One Command
+
+**Build for your phone (Flutter — works on ALL phones):**
+```bash
+curl -sSL https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.sh | bash -s -- mobile
+```
+
+Or build manually:
+```bash
+git clone https://github.com/ovalentine964/alphastack.git
+cd alphastack/apps/mobile
+flutter pub get
+flutter build apk --release    # Android
+flutter build ios --release    # iOS (requires Mac + Xcode)
+```
+
+**Download pre-built:**
+- 📱 [Android APK](https://github.com/ovalentine964/alphastack/releases/latest)
+- 🍎 [iOS via TestFlight](https://github.com/ovalentine964/alphastack/releases/latest)
+
+---
+
+### 🌐 Web (Any Browser)
+
+```bash
+https://alphastack.app
+```
 
 📖 **Full installation guide:** [INSTALL.md](INSTALL.md)
 
