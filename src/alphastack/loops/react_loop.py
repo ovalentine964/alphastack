@@ -148,21 +148,8 @@ class ReActLoop:
     Implements the Think → Act → Observe cycle that drives all
     AlphaStack agent decisions.
 
-    Usage
-    -----
-    ```python
-    loop = ReActLoop(tools=[...], max_steps=10)
-
-    def reason(step, observations) -> tuple[str, str, dict]:
-        """Given current state, return (thought, action, action_input)."""
-        ...
-
-    result = await loop.run(
-        context="BTC is testing 200-day MA with declining volume",
-        reason_fn=reason,
-        decision_threshold=0.8,
-    )
-    ```
+    Usage: loop = ReActLoop(tools=[...], max_steps=10)
+    result = await loop.run(context=..., reason_fn=..., decision_threshold=0.8)
     """
 
     def __init__(
