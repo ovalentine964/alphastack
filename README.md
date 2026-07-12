@@ -10,13 +10,28 @@
 
 **Latest Release:** [GitHub Releases](https://github.com/ovalentine964/alphastack/releases/latest)
 
-| Platform | Download | Size |
-|----------|----------|------|
-| 🪟 **Windows** | [AlphaStack-Setup-x.x.x.exe](https://github.com/ovalentine964/alphastack/releases/latest) | ~15 MB |
-| 🍎 **macOS** | [AlphaStack-x.x.x.dmg](https://github.com/ovalentine964/alphastack/releases/latest) | ~12 MB |
-| 🐧 **Linux** | [AlphaStack-x.x.x.AppImage](https://github.com/ovalentine964/alphastack/releases/latest) | ~15 MB |
-| 📱 **Android** | [AlphaStack-x.x.x.apk](https://github.com/ovalentine964/alphastack/releases/latest) | ~25 MB |
-| 🌐 **Web App** | [https://alphastack.app](https://alphastack.app) | — |
+### One-Command Install
+
+**Linux / macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.sh | bash
+```
+
+**Windows (PowerShell as Admin):**
+```powershell
+irm https://raw.githubusercontent.com/ovalentine964/alphastack/main/install.ps1 | iex
+```
+
+**Android:**
+Download APK: https://github.com/ovalentine964/alphastack/releases/latest
+
+### Desktop App (Pre-built)
+
+| Platform | Download |
+|----------|----------|
+| 🪟 **Windows** | [AlphaStack-Setup.exe](https://github.com/ovalentine964/alphastack/releases/latest) |
+| 🍎 **macOS** | [AlphaStack.dmg](https://github.com/ovalentine964/alphastack/releases/latest) |
+| 🐧 **Linux** | [AlphaStack.AppImage](https://github.com/ovalentine964/alphastack/releases/latest) |
 
 📖 **Full installation guide:** [INSTALL.md](INSTALL.md)
 
