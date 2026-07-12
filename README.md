@@ -6,6 +6,22 @@
 
 ---
 
+## 📥 Download AlphaStack
+
+**Latest Release:** [GitHub Releases](https://github.com/ovalentine964/alphastack/releases/latest)
+
+| Platform | Download | Size |
+|----------|----------|------|
+| 🪟 **Windows** | [AlphaStack-Setup-x.x.x.exe](https://github.com/ovalentine964/alphastack/releases/latest) | ~15 MB |
+| 🍎 **macOS** | [AlphaStack-x.x.x.dmg](https://github.com/ovalentine964/alphastack/releases/latest) | ~12 MB |
+| 🐧 **Linux** | [AlphaStack-x.x.x.AppImage](https://github.com/ovalentine964/alphastack/releases/latest) | ~15 MB |
+| 📱 **Android** | [AlphaStack-x.x.x.apk](https://github.com/ovalentine964/alphastack/releases/latest) | ~25 MB |
+| 🌐 **Web App** | [https://alphastack.app](https://alphastack.app) | — |
+
+📖 **Full installation guide:** [INSTALL.md](INSTALL.md)
+
+---
+
 ## What Is Alpha Stack?
 
 Alpha Stack is a comprehensive AI-powered trading system that automates decision-making across **crypto and forex markets**. It combines deep learning, reinforcement learning, multi-agent orchestration, and quantitative finance to execute trades with institutional-grade discipline — eliminating the emotional bias and time constraints that cause 70-90% of retail traders to fail.
