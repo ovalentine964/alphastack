@@ -141,10 +141,10 @@ class AlphaStackPipeline:
     @staticmethod
     def _merge_context(base: AlphaStackContext, update: AlphaStackContext) -> AlphaStackContext:
         """Merge only the fields that *update* changed from *base*."""
-        base_dict = base.model_dump()
-        update_dict = update.model_dump()
         merged = {}
-        for key in base_dict:
-            if update_dict[key] != base_dict[key]:
-                merged[key] = update_dict[key]
+        for field_name in base.model_fields:
+            base_val = getattr(base, field_name)
+            update_val = getattr(update, field_name)
+            if base_val != update_val:
+                merged[field_name] = update_val
         return base.update(**merged)
