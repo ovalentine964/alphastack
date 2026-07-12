@@ -1,0 +1,103 @@
+version: "3.9"
+
+x-common-env: &common-env
+  ALPHASTACK_ENV: dev
+  DB_HOST: timescaledb
+  DB_PORT: 5432
+  DB_NAME: alphastack
+  DB_USER: alphastack
+  DB_PASSWORD: alphastack
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  API_HOST: "0.0.0.0"
+  API_PORT: 8000
+  API_DEBUG: "true"
+
+services:
+  # ---------------------------------------------------------------------------
+  # TimescaleDB (PostgreSQL + TimescaleDB extension)
+  # ---------------------------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: alphastack-timescaledb
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: alphastack
+      POSTGRES_USER: alphastack
+      POSTGRES_PASSWORD: alphastack
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphastack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: alphastack-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Trading Engine (background worker)
+  # ---------------------------------------------------------------------------
+  trading-engine:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: alphastack-engine
+    restart: unless-stopped
+    command: ["python", "-m", "alphastack.engine"]
+    environment:
+      <<: *common-env
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../../src:/app/src
+      - ../../logs:/app/logs
+    profiles:
+      - engine
+
+  # ---------------------------------------------------------------------------
+  # API Server
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: alphastack-api
+    restart: unless-stopped
+    command: ["uvicorn", "alphastack.api.rest.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-env
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../../src:/app/src
+      - ../../logs:/app/logs
+
+volumes:
+  timescaledb_data:
+  redis_data:
