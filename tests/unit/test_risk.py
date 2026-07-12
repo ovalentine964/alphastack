@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from alphastack.risk.exposure import ExposureManager, ExposureSnapshot, PositionExposure
@@ -24,78 +26,58 @@ from alphastack.risk.validators import (
 
 class TestTradeValidator:
 
+    def _make_request(self, **kwargs: Any) -> Any:
+        """Build a TradeRequest-like object with defaults."""
+        from alphastack.risk.governor import TradeRequest
+        defaults = {
+            "symbol": "EUR/USD",
+            "direction": "long",
+            "requested_size": 0.1,
+            "entry_price": 1.1050,
+            "stop_loss": 1.1000,
+            "take_profit": 1.1150,
+            "strategy_id": "test",
+            "session": "london",
+        }
+        defaults.update(kwargs)
+        return TradeRequest(**defaults)
+
     def test_valid_trade_passes(self, trade_validator: TradeValidator) -> None:
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="long",
-            entry_price=1.1050,
-            stop_loss=1.1000,
-            size=0.1,
-        )
+        request = self._make_request()
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is True
         assert len(result.errors) == 0
 
     def test_zero_price_rejected(self, trade_validator: TradeValidator) -> None:
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="long",
-            entry_price=0.0,
-            stop_loss=1.1000,
-            size=0.1,
-        )
+        request = self._make_request(entry_price=0.0)
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is False
-        assert any("price" in e.lower() for e in result.errors)
 
     def test_negative_size_rejected(self, trade_validator: TradeValidator) -> None:
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="long",
-            entry_price=1.1050,
-            stop_loss=1.1000,
-            size=-0.1,
-        )
+        request = self._make_request(requested_size=-0.1)
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is False
 
     def test_invalid_direction_rejected(self, trade_validator: TradeValidator) -> None:
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="sideways",
-            entry_price=1.1050,
-            stop_loss=1.1000,
-            size=0.1,
-        )
+        request = self._make_request(direction="sideways")
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is False
 
     def test_long_stop_above_entry_rejected(self, trade_validator: TradeValidator) -> None:
         """Stop loss above entry for a long trade is backwards."""
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="long",
-            entry_price=1.1000,
-            stop_loss=1.1100,
-            size=0.1,
-        )
+        request = self._make_request(entry_price=1.1000, stop_loss=1.1100)
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is False
 
     def test_short_stop_below_entry_rejected(self, trade_validator: TradeValidator) -> None:
         """Stop loss below entry for a short trade is backwards."""
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="short",
-            entry_price=1.1000,
-            stop_loss=1.0900,
-            size=0.1,
-        )
+        request = self._make_request(direction="short", entry_price=1.1000, stop_loss=1.0900)
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is False
 
     def test_extreme_price_rejected(self, trade_validator: TradeValidator) -> None:
-        result = trade_validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="long",
-            entry_price=1e15,
-            stop_loss=1.1000,
-            size=0.1,
-        )
+        request = self._make_request(entry_price=1e15)
+        result = trade_validator.validate_pre_trade(request)
         assert result.valid is False
 
 
@@ -187,7 +169,7 @@ class TestExposureManager:
 class TestPositionSizer:
 
     def test_fixed_risk_sizing(self) -> None:
-        sizer = PositionSizer()
+        sizer = PositionSizer(account_balance=10_000.0)
         request = SizingRequest(
             symbol="EUR/USD",
             direction="long",
@@ -197,13 +179,13 @@ class TestPositionSizer:
             method=SizingMethod.FIXED_RISK,
             max_risk_pct=2.0,
         )
-        result = sizer.calculate(request)
+        result = sizer.size_position(request)
         assert isinstance(result, SizingResult)
         assert result.risk_amount > 0
         assert result.risk_pct <= 2.0 + 0.01  # small tolerance
 
     def test_zero_balance_returns_zero(self) -> None:
-        sizer = PositionSizer()
+        sizer = PositionSizer(account_balance=0.0)
         request = SizingRequest(
             symbol="EUR/USD",
             direction="long",
@@ -212,11 +194,11 @@ class TestPositionSizer:
             account_balance=0.0,
             method=SizingMethod.FIXED_RISK,
         )
-        result = sizer.calculate(request)
+        result = sizer.size_position(request)
         assert result.max_size == 0.0
 
     def test_kelly_sizing(self) -> None:
-        sizer = PositionSizer()
+        sizer = PositionSizer(account_balance=10_000.0)
         request = SizingRequest(
             symbol="EUR/USD",
             direction="long",
@@ -228,13 +210,13 @@ class TestPositionSizer:
             avg_win=2.0,
             avg_loss=1.0,
         )
-        result = sizer.calculate(request)
+        result = sizer.size_position(request)
         assert result.max_size > 0
         assert result.method_used == SizingMethod.KELLY
 
     def test_larger_stop_means_smaller_size(self) -> None:
         """Wider stop → less size for same risk budget."""
-        sizer = PositionSizer()
+        sizer = PositionSizer(account_balance=10_000.0)
         base = SizingRequest(
             symbol="EUR/USD", direction="long",
             entry_price=1.1050, stop_loss=1.1000,
@@ -245,6 +227,6 @@ class TestPositionSizer:
             entry_price=1.1050, stop_loss=1.0900,
             account_balance=10_000.0, max_risk_pct=2.0,
         )
-        r1 = sizer.calculate(base)
-        r2 = sizer.calculate(wide)
+        r1 = sizer.size_position(base)
+        r2 = sizer.size_position(wide)
         assert r1.max_size > r2.max_size

@@ -1,66 +1,66 @@
-"""Simple backtester engine for AlphaStack strategies.
-
-Replays historical data through the same pipeline used in live trading
-and computes performance metrics: win rate, Sharpe ratio, max drawdown,
-profit factor, etc.
-"""
+"""Simple backtester — runs AlphaStack pipeline on historical OHLCV data and calculates performance metrics."""
 
 from __future__ import annotations
 
-import uuid
+import asyncio
+import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, Field
 
-from alphastack.utils.logger import get_logger
-
-log = get_logger(__name__)
+from alphastack.strategy.context import AlphaStackContext, Direction
+from alphastack.strategy.pipeline import AlphaStackPipeline
 
 
 # ---------------------------------------------------------------------------
-# Models
+# Trade record
 # ---------------------------------------------------------------------------
 
-class BacktestTrade(BaseModel):
-    """A single trade in the backtest."""
-    trade_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:8])
+@dataclass
+class TradeRecord:
+    """A single completed trade from the backtest."""
+    entry_time: datetime
+    exit_time: datetime | None = None
     symbol: str = ""
-    side: str = ""  # long | short
+    direction: str = ""
     entry_price: float = 0.0
     exit_price: float = 0.0
-    quantity: float = 0.0
-    entry_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    exit_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    stop_loss: float = 0.0
+    take_profit: list[float] = field(default_factory=list)
+    position_size: float = 0.0
     pnl: float = 0.0
     pnl_pct: float = 0.0
-    bars_held: int = 0
+    confluence_score: float = 0.0
+    exit_reason: str = ""
 
 
-class BacktestResult(BaseModel):
-    """Aggregated backtest performance metrics."""
+# ---------------------------------------------------------------------------
+# Performance metrics
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BacktestMetrics:
+    """Aggregate performance metrics from a backtest run."""
     total_trades: int = 0
     winning_trades: int = 0
     losing_trades: int = 0
     win_rate: float = 0.0
     total_pnl: float = 0.0
+    total_return_pct: float = 0.0
     avg_win: float = 0.0
     avg_loss: float = 0.0
     profit_factor: float = 0.0
+    max_drawdown: float = 0.0
+    max_drawdown_pct: float = 0.0
     sharpe_ratio: float = 0.0
     sortino_ratio: float = 0.0
-    max_drawdown_pct: float = 0.0
-    max_drawdown_amount: float = 0.0
-    calmar_ratio: float = 0.0
-    avg_bars_held: float = 0.0
+    avg_holding_bars: float = 0.0
     expectancy: float = 0.0
-    initial_balance: float = 0.0
-    final_balance: float = 0.0
-    return_pct: float = 0.0
-    equity_curve: list[float] = Field(default_factory=list)
-    trades: list[BacktestTrade] = Field(default_factory=list)
+    calmar_ratio: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -68,273 +68,268 @@ class BacktestResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 class Backtester:
-    """Simple event-driven backtester.
-
-    Replays OHLCV bars through a signal generator function and tracks
-    hypothetical trades with configurable risk parameters.
+    """Runs AlphaStack pipeline on historical OHLCV bars.
 
     Usage::
 
-        def my_signal(bar, history):
-            # return "long", "short", or None
-            ...
-
-        bt = Backtester(initial_balance=10_000)
-        result = bt.run(ohlcv_data, signal_fn=my_signal)
-        print(result.sharpe_ratio, result.max_drawdown_pct)
+        bt = Backtester(initial_balance=10000.0)
+        metrics = bt.run(ohlcv_data, symbol="EUR/USD", timeframe="1H")
     """
 
     def __init__(
         self,
         initial_balance: float = 10_000.0,
-        risk_per_trade_pct: float = 2.0,
-        stop_loss_atr_mult: float = 1.5,
-        take_profit_atr_mult: float = 3.0,
+        risk_pct: float = 1.0,
+        max_open_trades: int = 1,
         commission_pct: float = 0.0,
-        slippage_pct: float = 0.0,
-        max_open_trades: int = 3,
     ) -> None:
-        self.initial_balance = initial_balance
-        self.risk_per_trade_pct = risk_per_trade_pct
-        self.stop_loss_atr_mult = stop_loss_atr_mult
-        self.take_profit_atr_mult = take_profit_atr_mult
-        self.commission_pct = commission_pct
-        self.slippage_pct = slippage_pct
-        self.max_open_trades = max_open_trades
+        self._initial_balance = initial_balance
+        self._risk_pct = risk_pct
+        self._max_open_trades = max_open_trades
+        self._commission_pct = commission_pct
 
     def run(
         self,
-        ohlcv: np.ndarray,
-        signal_fn: Any,
-        symbol: str = "BACKTEST",
-    ) -> BacktestResult:
-        """Run a backtest over OHLCV data.
+        ohlcv: dict[str, list[float]],
+        symbol: str = "EUR/USD",
+        timeframe: str = "1H",
+        start_index: int = 100,
+    ) -> tuple[BacktestMetrics, list[TradeRecord]]:
+        """Run backtest on OHLCV data. Returns metrics and trade list."""
+        closes = ohlcv["closes"]
+        n = len(closes)
+        if n < start_index + 10:
+            return BacktestMetrics(), []
 
-        Args:
-            ohlcv: Array of shape (n_bars, 5) — [open, high, low, close, volume].
-            signal_fn: Callable(bar, history) → "long" | "short" | None.
-            symbol: Symbol name for trade records.
+        balance = self._initial_balance
+        peak_balance = balance
+        max_dd = 0.0
+        trades: list[TradeRecord] = []
+        equity_curve: list[float] = []
+        open_trade: TradeRecord | None = None
+        pipeline = AlphaStackPipeline(parallel=False)
 
-        Returns:
-            BacktestResult with all metrics.
-        """
-        if ohlcv.ndim != 2 or ohlcv.shape[1] < 5:
-            raise ValueError(f"ohlcv must be (n_bars, 5), got {ohlcv.shape}")
+        for i in range(start_index, n):
+            # Build window of data up to bar i
+            window = {
+                "opens": ohlcv["opens"][:i + 1],
+                "highs": ohlcv["highs"][:i + 1],
+                "lows": ohlcv["lows"][:i + 1],
+                "closes": ohlcv["closes"][:i + 1],
+                "volumes": ohlcv["volumes"][:i + 1],
+                "close": closes[i],
+                "high_impact_events": [],
+                "news_sentiment": 0.0,
+                "volatility_index": 14.0,
+                "atr_pips": self._estimate_atr(ohlcv, i),
+                "pip_size": 0.0001,
+                "spread_pips": 1.5,
+                "account_balance": balance,
+                "risk_pct": self._risk_pct,
+                "pip_value": 10.0,
+                "stop_multiplier": 1.5,
+                "rsi_period": 14,
+                "entry_price": closes[i],
+                "timeframe_closes": {
+                    "1h": closes[max(0, i - 30):i + 1],
+                    "4h": closes[max(0, i - 30):i + 1],
+                },
+                "htf_closes": closes[max(0, i - 30):i + 1],
+            }
 
-        n_bars = len(ohlcv)
-        balance = self.initial_balance
-        equity_curve = [balance]
-        trades: list[BacktestTrade] = []
-        open_trades: list[dict[str, Any]] = []
-
-        # Pre-compute ATR
-        highs = ohlcv[:, 1]
-        lows = ohlcv[:, 2]
-        closes = ohlcv[:, 3]
-        tr = np.maximum(
-            highs - lows,
-            np.maximum(
-                np.abs(highs - np.roll(closes, 1)),
-                np.abs(lows - np.roll(closes, 1)),
-            ),
-        )
-        tr[0] = highs[0] - lows[0]
-        atr = np.convolve(tr, np.ones(14) / 14, mode="same")
-
-        for i in range(14, n_bars):
-            bar = ohlcv[i]
-            history = ohlcv[:i]
-            opn, high, low, close = bar[0], bar[1], bar[2], bar[3]
-            current_atr = atr[i]
-
-            # --- check exits for open trades ---
-            still_open: list[dict[str, Any]] = []
-            for trade in open_trades:
-                exited = False
-                exit_price = close
-
-                if trade["side"] == "long":
-                    if low <= trade["stop_loss"]:
-                        exit_price = trade["stop_loss"]
-                        exited = True
-                    elif high >= trade["take_profit"]:
-                        exit_price = trade["take_profit"]
-                        exited = True
-                else:  # short
-                    if high >= trade["stop_loss"]:
-                        exit_price = trade["stop_loss"]
-                        exited = True
-                    elif low <= trade["take_profit"]:
-                        exit_price = trade["take_profit"]
-                        exited = True
-
-                if exited:
-                    # Apply slippage
-                    slip = exit_price * self.slippage_pct / 100
-                    if trade["side"] == "long":
-                        exit_price -= slip
-                    else:
-                        exit_price += slip
-
-                    pnl = self._calc_pnl(
-                        trade["side"], trade["entry_price"], exit_price, trade["quantity"],
-                    )
-                    commission = abs(exit_price * trade["quantity"]) * self.commission_pct / 100
-                    pnl -= commission
-                    balance += pnl
-
-                    trades.append(BacktestTrade(
-                        symbol=symbol,
-                        side=trade["side"],
-                        entry_price=trade["entry_price"],
-                        exit_price=exit_price,
-                        quantity=trade["quantity"],
-                        entry_time=trade["entry_time"],
-                        exit_time=datetime.now(timezone.utc),
-                        pnl=round(pnl, 2),
-                        pnl_pct=round(pnl / self.initial_balance * 100, 4),
-                        bars_held=i - trade["entry_bar"],
-                    ))
-                else:
-                    still_open.append(trade)
-
-            open_trades = still_open
-
-            # --- check for new signals ---
-            if len(open_trades) < self.max_open_trades:
-                signal = signal_fn(bar, history)
-                if signal in ("long", "short"):
-                    # Position sizing
-                    risk_amount = balance * self.risk_per_trade_pct / 100
-                    sl_distance = current_atr * self.stop_loss_atr_mult
-                    if sl_distance > 0:
-                        quantity = risk_amount / sl_distance
-                    else:
-                        quantity = 0
-
-                    if quantity > 0:
-                        entry_price = close + (close * self.slippage_pct / 100 * (1 if signal == "long" else -1))
-                        entry_commission = abs(entry_price * quantity) * self.commission_pct / 100
-                        balance -= entry_commission
-
-                        if signal == "long":
-                            sl = entry_price - sl_distance
-                            tp = entry_price + current_atr * self.take_profit_atr_mult
-                        else:
-                            sl = entry_price + sl_distance
-                            tp = entry_price - current_atr * self.take_profit_atr_mult
-
-                        open_trades.append({
-                            "side": signal,
-                            "entry_price": entry_price,
-                            "stop_loss": sl,
-                            "take_profit": tp,
-                            "quantity": quantity,
-                            "entry_time": datetime.now(timezone.utc),
-                            "entry_bar": i,
-                        })
-
-            equity_curve.append(balance + sum(
-                self._calc_pnl(t["side"], t["entry_price"], close, t["quantity"])
-                for t in open_trades
-            ))
-
-        # Close any remaining open trades at last close
-        for trade in open_trades:
-            pnl = self._calc_pnl(trade["side"], trade["entry_price"], closes[-1], trade["quantity"])
-            balance += pnl
-            trades.append(BacktestTrade(
+            now = datetime(2025, 1, 1, tzinfo=timezone.utc)
+            ctx = AlphaStackContext(
                 symbol=symbol,
-                side=trade["side"],
-                entry_price=trade["entry_price"],
-                exit_price=closes[-1],
-                quantity=trade["quantity"],
-                entry_time=trade["entry_time"],
-                exit_time=datetime.now(timezone.utc),
-                pnl=round(pnl, 2),
-                pnl_pct=round(pnl / self.initial_balance * 100, 4),
-                bars_held=n_bars - 1 - trade["entry_bar"],
-            ))
+                timeframe=timeframe,
+                timestamp=now,
+                market_data=window,
+            )
 
-        return self._compute_metrics(trades, equity_curve, balance)
+            # Run pipeline synchronously
+            result = asyncio.get_event_loop().run_until_complete(pipeline.run(ctx))
 
-    # ------------------------------------------------------------------
-    # Metrics
-    # ------------------------------------------------------------------
+            # Check exit conditions for open trade
+            if open_trade is not None:
+                should_exit, exit_reason = self._check_exit(open_trade, closes[i], result)
+                if should_exit:
+                    open_trade.exit_time = now
+                    open_trade.exit_price = closes[i]
+                    open_trade.exit_reason = exit_reason
+                    if open_trade.direction == "long":
+                        open_trade.pnl = (open_trade.exit_price - open_trade.entry_price) * open_trade.position_size / open_trade.entry_price * balance
+                    else:
+                        open_trade.pnl = (open_trade.entry_price - open_trade.exit_price) * open_trade.position_size / open_trade.entry_price * balance
+                    open_trade.pnl -= balance * open_trade.position_size * self._commission_pct / 100
+                    open_trade.pnl_pct = (open_trade.pnl / balance) * 100
+                    balance += open_trade.pnl
+                    trades.append(open_trade)
+                    open_trade = None
+
+            # Check for new entry
+            if open_trade is None and result.confluence.direction != Direction.NONE:
+                direction = "long" if result.confluence.direction == Direction.LONG else "short"
+                sl = result.stop_loss.price
+                size = result.sizing.position_size
+
+                if size > 0 and sl > 0:
+                    open_trade = TradeRecord(
+                        entry_time=now,
+                        symbol=symbol,
+                        direction=direction,
+                        entry_price=closes[i],
+                        stop_loss=sl,
+                        take_profit=result.take_profit.levels,
+                        position_size=size,
+                        confluence_score=result.confluence.score,
+                    )
+
+            # Track equity
+            equity = balance
+            if open_trade and open_trade.direction == "long":
+                equity += (closes[i] - open_trade.entry_price) * open_trade.position_size / open_trade.entry_price * balance
+            elif open_trade and open_trade.direction == "short":
+                equity += (open_trade.entry_price - closes[i]) * open_trade.position_size / open_trade.entry_price * balance
+            equity_curve.append(equity)
+
+            if equity > peak_balance:
+                peak_balance = equity
+            dd = peak_balance - equity
+            if dd > max_dd:
+                max_dd = dd
+
+        # Close any remaining open trade
+        if open_trade:
+            open_trade.exit_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+            open_trade.exit_price = closes[-1]
+            open_trade.exit_reason = "end_of_data"
+            if open_trade.direction == "long":
+                open_trade.pnl = (open_trade.exit_price - open_trade.entry_price) * open_trade.position_size / open_trade.entry_price * balance
+            else:
+                open_trade.pnl = (open_trade.entry_price - open_trade.exit_price) * open_trade.position_size / open_trade.entry_price * balance
+            balance += open_trade.pnl
+            trades.append(open_trade)
+
+        metrics = self._compute_metrics(trades, equity_curve, max_dd)
+        return metrics, trades
+
+    def _check_exit(
+        self,
+        trade: TradeRecord,
+        current_price: float,
+        ctx: AlphaStackContext,
+    ) -> tuple[bool, str]:
+        """Check if an open trade should be closed."""
+        # Stop loss hit
+        if trade.direction == "long" and current_price <= trade.stop_loss:
+            return True, "stop_loss"
+        if trade.direction == "short" and current_price >= trade.stop_loss:
+            return True, "stop_loss"
+
+        # Take profit hit
+        if trade.take_profit:
+            tp = trade.take_profit[0]
+            if trade.direction == "long" and current_price >= tp:
+                return True, "take_profit"
+            if trade.direction == "short" and current_price <= tp:
+                return True, "take_profit"
+
+        # Exit signal from pipeline
+        if ctx.exit_signal.should_exit:
+            return True, ctx.exit_signal.reason
+
+        return False, ""
+
+    def _estimate_atr(self, ohlcv: dict, index: int, period: int = 14) -> float:
+        """Estimate ATR in pips."""
+        start = max(0, index - period)
+        highs = ohlcv["highs"][start:index + 1]
+        lows = ohlcv["lows"][start:index + 1]
+        closes = ohlcv["closes"][start:index + 1]
+        if len(closes) < 2:
+            return 50.0
+        trs = []
+        for i in range(1, len(closes)):
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
+            trs.append(tr)
+        atr = sum(trs) / len(trs) if trs else 0.001
+        return atr / 0.0001  # convert to pips
 
     def _compute_metrics(
         self,
-        trades: list[BacktestTrade],
+        trades: list[TradeRecord],
         equity_curve: list[float],
-        final_balance: float,
-    ) -> BacktestResult:
-        """Compute all backtest performance metrics."""
-        result = BacktestResult(
-            initial_balance=self.initial_balance,
-            final_balance=round(final_balance, 2),
-            return_pct=round((final_balance / self.initial_balance - 1) * 100, 2),
-            trades=trades,
-            equity_curve=[round(e, 2) for e in equity_curve],
-        )
-
+        max_dd: float,
+    ) -> BacktestMetrics:
+        """Compute aggregate performance metrics."""
         if not trades:
-            return result
+            return BacktestMetrics()
 
         pnls = [t.pnl for t in trades]
-        wins = [p for p in pnls if p > 0]
-        losses = [p for p in pnls if p <= 0]
+        winners = [p for p in pnls if p > 0]
+        losers = [p for p in pnls if p <= 0]
 
-        result.total_trades = len(trades)
-        result.winning_trades = len(wins)
-        result.losing_trades = len(losses)
-        result.win_rate = round(len(wins) / len(trades), 4)
-        result.total_pnl = round(sum(pnls), 2)
-        result.avg_win = round(np.mean(wins), 2) if wins else 0.0
-        result.avg_loss = round(np.mean(losses), 2) if losses else 0.0
+        total_pnl = sum(pnls)
+        win_rate = len(winners) / len(trades) if trades else 0.0
+        avg_win = sum(winners) / len(winners) if winners else 0.0
+        avg_loss = sum(losers) / len(losers) if losers else 0.0
 
-        # Profit factor
-        gross_profit = sum(wins) if wins else 0
-        gross_loss = abs(sum(losses)) if losses else 0
-        result.profit_factor = round(
-            gross_profit / gross_loss if gross_loss > 0 else float("inf"), 2,
-        )
+        gross_profit = sum(winners)
+        gross_loss = abs(sum(losers))
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
 
-        # Expectancy
-        result.expectancy = round(
-            result.win_rate * result.avg_win + (1 - result.win_rate) * result.avg_loss, 2,
-        )
-
-        # Sharpe ratio (annualized, assuming daily bars)
-        returns = np.diff(equity_curve) / np.array(equity_curve[:-1])
-        if len(returns) > 1 and np.std(returns) > 0:
-            result.sharpe_ratio = round(
-                np.mean(returns) / np.std(returns) * np.sqrt(252), 2,
-            )
+        # Sharpe ratio (annualized, assuming daily returns)
+        if len(pnls) > 1:
+            mean_return = np.mean(pnls)
+            std_return = np.std(pnls, ddof=1)
+            sharpe = (mean_return / std_return) * math.sqrt(252) if std_return > 0 else 0.0
+        else:
+            sharpe = 0.0
 
         # Sortino ratio
-        downside = returns[returns < 0]
-        if len(downside) > 0 and np.std(downside) > 0:
-            result.sortino_ratio = round(
-                np.mean(returns) / np.std(downside) * np.sqrt(252), 2,
-            )
+        downside = [p for p in pnls if p < 0]
+        if downside and len(pnls) > 1:
+            downside_std = np.std(downside, ddof=1)
+            sortino = (np.mean(pnls) / downside_std) * math.sqrt(252) if downside_std > 0 else 0.0
+        else:
+            sortino = 0.0
 
-        # Max drawdown
-        peak = np.maximum.accumulate(equity_curve)
-        drawdown = (np.array(equity_curve) - peak) / peak * 100
-        result.max_drawdown_pct = round(float(np.min(drawdown)), 2)
-        result.max_drawdown_amount = round(float(np.min(np.array(equity_curve) - peak)), 2)
+        # Max drawdown from equity curve
+        max_dd_pct = 0.0
+        if equity_curve:
+            peak = equity_curve[0]
+            for eq in equity_curve:
+                if eq > peak:
+                    peak = eq
+                dd_pct = (peak - eq) / peak * 100 if peak > 0 else 0
+                if dd_pct > max_dd_pct:
+                    max_dd_pct = dd_pct
+
+        total_return_pct = (total_pnl / self._initial_balance) * 100
+
+        # Expectancy
+        expectancy = (win_rate * avg_win + (1 - win_rate) * avg_loss) if trades else 0.0
 
         # Calmar ratio
-        if result.max_drawdown_pct < 0:
-            annual_return = result.return_pct  # simplified
-            result.calmar_ratio = round(annual_return / abs(result.max_drawdown_pct), 2)
+        calmar = total_return_pct / max_dd_pct if max_dd_pct > 0 else 0.0
 
-        result.avg_bars_held = round(np.mean([t.bars_held for t in trades]), 1)
-
-        return result
-
-    @staticmethod
-    def _calc_pnl(side: str, entry: float, exit: float, quantity: float) -> float:
-        if side == "long":
-            return (exit - entry) * quantity
-        return (entry - exit) * quantity
+        return BacktestMetrics(
+            total_trades=len(trades),
+            winning_trades=len(winners),
+            losing_trades=len(losers),
+            win_rate=round(win_rate, 4),
+            total_pnl=round(total_pnl, 2),
+            total_return_pct=round(total_return_pct, 2),
+            avg_win=round(avg_win, 2),
+            avg_loss=round(avg_loss, 2),
+            profit_factor=round(profit_factor, 2),
+            max_drawdown=round(max_dd, 2),
+            max_drawdown_pct=round(max_dd_pct, 2),
+            sharpe_ratio=round(sharpe, 2),
+            sortino_ratio=round(sortino, 2),
+            expectancy=round(expectancy, 2),
+            calmar_ratio=round(calmar, 2),
+        )

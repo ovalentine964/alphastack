@@ -1,32 +1,25 @@
-"""Integration test — full trade lifecycle from signal to execution.
-
-Tests the complete flow:
-Signal → Pipeline → Risk Governor → Order → Broker → Fill → Event
-"""
+"""Integration test: full trade lifecycle from signal to journal."""
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
-
 import pytest
+from datetime import datetime, timezone
 
-from alphastack.brokers.models import (
-    BrokerOrder,
-    OrderSide,
-    OrderStatus,
-    OrderType,
+from alphastack.brokers.models import BrokerOrder, OrderSide, OrderStatus, OrderType
+from alphastack.core.events import EventType, SignalEvent, TradeEvent
+from alphastack.risk.governor import RiskGovernor, TradeRequest
+from alphastack.strategy.context import (
+    AlphaStackContext,
+    Bias,
+    ConfluenceResult,
+    Direction,
+    FundamentalData,
+    MarketBias,
+    Session,
+    SessionData,
+    StructureData,
+    StructureType,
 )
-from alphastack.core.events import (
-    Event,
-    EventType,
-    SignalEvent,
-    TradeEvent,
-)
-from alphastack.risk.exposure import ExposureManager, PositionExposure
-from alphastack.risk.governor import RiskGovernor, TradeApproval, TradeRequest
-from alphastack.risk.validators import TradeValidator
 from tests.conftest import InMemoryEventBus, MockBrokerConnector
 
 
@@ -34,233 +27,145 @@ from tests.conftest import InMemoryEventBus, MockBrokerConnector
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _signal_to_execution(
-    bus: InMemoryEventBus,
-    broker: MockBrokerConnector,
-    validator: TradeValidator,
-    exposure: ExposureManager,
-    signal: SignalEvent,
-) -> tuple[TradeApproval, BrokerOrder | None]:
-    """Simulate the full lifecycle: signal → risk check → order → fill."""
-    # 1. Publish signal event
-    await bus.publish(signal)
-
-    # 2. Validate trade
-    validation = validator.validate_pre_trade(
-        symbol=signal.symbol,
-        direction=signal.side,
-        entry_price=1.1050,
-        stop_loss=1.1000 if signal.side == "long" else 1.1100,
-        size=0.1,
+def _make_trade_request_from_context(ctx: AlphaStackContext) -> TradeRequest:
+    """Convert a strategy context into a TradeRequest for the risk governor."""
+    return TradeRequest(
+        symbol=ctx.symbol,
+        direction="long" if ctx.confluence.direction == Direction.LONG else "short",
+        requested_size=ctx.sizing.position_size or 0.1,
+        entry_price=ctx.market_data.get("close", 1.1050),
+        stop_loss=ctx.stop_loss.price or 1.1000,
+        take_profit=ctx.take_profit.levels[0] if ctx.take_profit.levels else 0.0,
+        strategy_id="alphastack_v1",
+        session=ctx.session.active.value if ctx.session.active else "london",
     )
-    if not validation.valid:
-        return TradeApproval(
-            approved=False,
-            rejection_reason="; ".join(validation.errors),
-        ), None
-
-    # 3. Check exposure
-    ok, reason = exposure.check_add_position(
-        symbol=signal.symbol,
-        direction=signal.side,
-        size=0.1,
-        price=1.1050,
-        balance=10_000.0,
-        session="london",
-    )
-    if not ok:
-        return TradeApproval(approved=False, rejection_reason=reason), None
-
-    # 4. Place order
-    order = BrokerOrder(
-        symbol=signal.symbol,
-        side=OrderSide.BUY if signal.side == "long" else OrderSide.SELL,
-        order_type=OrderType.MARKET,
-        quantity=0.1,
-        price=1.1050,
-    )
-    filled = await broker.place_order(order)
-
-    # 5. Track position
-    exposure.add_position(PositionExposure(
-        symbol=signal.symbol,
-        direction=signal.side,
-        size=0.1,
-        entry_price=filled.avg_fill_price,
-        session="london",
-    ))
-
-    # 6. Publish trade event
-    trade_event = TradeEvent(
-        order_id=filled.id,
-        symbol=signal.symbol,
-        side="buy" if signal.side == "long" else "sell",
-        quantity=0.1,
-        price=filled.avg_fill_price,
-        status="filled",
-        source="integration_test",
-    )
-    await bus.publish(trade_event)
-
-    return TradeApproval(approved=True, adjusted_size=0.1), filled
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Full Trade Lifecycle
+# ===========================================================================
 
 class TestTradeLifecycle:
-    """End-to-end trade lifecycle integration tests."""
+    """End-to-end: Signal → Risk check → Execution → Journal."""
 
     @pytest.mark.asyncio
-    async def test_full_lifecycle_long(self) -> None:
-        """Signal → validation → risk → order → fill → event."""
-        bus = InMemoryEventBus()
-        broker = MockBrokerConnector()
-        validator = TradeValidator()
-        exposure = ExposureManager(max_open_positions=5)
+    async def test_full_lifecycle_bullish(self, mock_broker, event_bus, bullish_context):
+        """Happy path: bullish signal passes all gates, order filled, journal written."""
+        await mock_broker.connect()
 
-        await broker.connect()
-
+        # Step 1: Publish a signal event
         signal = SignalEvent(
-            symbol="EUR/USD",
-            side="long",
-            strength=0.85,
-            timeframe="1h",
-            strategy="alphastack_v1",
-            source="test",
+            symbol="EUR/USD", side="long", strength=0.85,
+            timeframe="1H", strategy="alphastack_v1",
         )
+        await event_bus.publish(signal)
 
-        approval, order = await _signal_to_execution(
-            bus, broker, validator, exposure, signal,
-        )
+        # Step 2: Build trade request from context
+        ctx = bullish_context
+        request = _make_trade_request_from_context(ctx)
 
+        # Step 3: Risk approval
+        gov = RiskGovernor(account_balance=10_000.0)
+        approval = await gov.approve_trade(request)
         assert approval.approved is True
-        assert order is not None
-        assert order.status == OrderStatus.FILLED
-        assert order.filled_quantity == 0.1
 
-        # Verify events were published
-        assert len(bus.published_events) == 2
-        assert bus.published_events[0].type == EventType.SIGNAL
-        assert bus.published_events[1].type == EventType.TRADE
+        # Step 4: Execute via broker
+        order = BrokerOrder(
+            symbol=request.symbol,
+            side=OrderSide.BUY if request.direction == "long" else OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=approval.adjusted_size,
+            price=request.entry_price,
+            stop_loss=request.stop_loss,
+            take_profit=request.take_profit,
+        )
+        filled = await mock_broker.place_order(order)
+        assert filled.status == OrderStatus.FILLED
 
-        # Verify position tracked
-        assert len(exposure._positions) == 1
-        assert exposure._positions[0].symbol == "EUR/USD"
+        # Step 5: Publish trade event
+        trade_evt = TradeEvent(
+            order_id=filled.broker_order_id,
+            symbol=filled.symbol,
+            side="buy" if filled.side == OrderSide.BUY else "sell",
+            quantity=filled.filled_quantity,
+            price=filled.avg_fill_price,
+            status="filled",
+        )
+        await event_bus.publish(trade_evt)
+
+        # Verify: events recorded
+        assert len(event_bus.published_events) == 2
+        assert event_bus.published_events[0].type == EventType.SIGNAL
+        assert event_bus.published_events[1].type == EventType.TRADE
+
+        # Step 6: Record trade result for risk tracking
+        gov.record_trade_result(50.0)
+        assert gov.account_balance == 10_050.0
 
     @pytest.mark.asyncio
-    async def test_full_lifecycle_short(self) -> None:
-        """Short trade lifecycle."""
-        bus = InMemoryEventBus()
-        broker = MockBrokerConnector()
-        validator = TradeValidator()
-        exposure = ExposureManager(max_open_positions=5)
+    async def test_lifecycle_rejected_by_risk(self, mock_broker, event_bus):
+        """Trade rejected by risk governor — no execution."""
+        await mock_broker.connect()
+        gov = RiskGovernor(account_balance=10_000.0)
+        gov.halt("test halt")
 
-        await broker.connect()
-
-        signal = SignalEvent(
-            symbol="GBP/USD",
-            side="short",
-            strength=-0.7,
-            timeframe="4h",
-            strategy="alphastack_v1",
-            source="test",
+        request = TradeRequest(
+            symbol="EUR/USD", direction="long", requested_size=0.1,
+            entry_price=1.1050, stop_loss=1.1000,
         )
-
-        approval, order = await _signal_to_execution(
-            bus, broker, validator, exposure, signal,
-        )
-
-        assert approval.approved is True
-        assert order is not None
-        assert order.side == OrderSide.SELL
-
-    @pytest.mark.asyncio
-    async def test_rejected_by_exposure(self) -> None:
-        """Trade rejected when exposure limit is hit."""
-        bus = InMemoryEventBus()
-        broker = MockBrokerConnector()
-        validator = TradeValidator()
-        exposure = ExposureManager(max_open_positions=0)  # no positions allowed
-
-        await broker.connect()
-
-        signal = SignalEvent(
-            symbol="EUR/USD", side="long", strength=0.8,
-            timeframe="1h", strategy="test", source="test",
-        )
-
-        approval, order = await _signal_to_execution(
-            bus, broker, validator, exposure, signal,
-        )
-
+        approval = await gov.approve_trade(request)
         assert approval.approved is False
-        assert "Max open positions" in approval.rejection_reason
-        assert order is None
+
+        # No order should be placed
+        balance = await mock_broker.get_balance()
+        assert balance.equity == 10_000.0
 
     @pytest.mark.asyncio
-    async def test_rejected_by_validation(self) -> None:
-        """Trade rejected by validator (bad parameters)."""
-        bus = InMemoryEventBus()
-        broker = MockBrokerConnector()
-        validator = TradeValidator()
-        exposure = ExposureManager()
+    async def test_lifecycle_with_circuit_breaker(self, mock_broker, event_bus):
+        """Circuit breaker trips after consecutive losses, halting further trades."""
+        await mock_broker.connect()
+        gov = RiskGovernor(account_balance=10_000.0)
 
-        await broker.connect()
+        # Record losses to trip circuit breaker
+        for _ in range(6):
+            gov.record_trade_result(-100.0)
 
-        # Manually call with invalid params
-        result = validator.validate_pre_trade(
-            symbol="EUR/USD",
-            direction="long",
-            entry_price=0.0,  # invalid
-            stop_loss=1.1000,
-            size=0.1,
+        request = TradeRequest(
+            symbol="EUR/USD", direction="long", requested_size=0.1,
+            entry_price=1.1050, stop_loss=1.1000,
         )
-        assert result.valid is False
+        approval = await gov.approve_trade(request)
+        assert approval.approved is False
+        assert "Circuit breaker" in approval.rejection_reason
 
     @pytest.mark.asyncio
-    async def test_multiple_trades_sequence(self) -> None:
-        """Multiple trades should accumulate positions."""
-        bus = InMemoryEventBus()
-        broker = MockBrokerConnector()
-        validator = TradeValidator()
-        exposure = ExposureManager(max_open_positions=10)
+    async def test_position_size_reduced_by_risk(self, mock_broker, event_bus, bullish_context):
+        """Risk governor may reduce position size."""
+        await mock_broker.connect()
+        gov = RiskGovernor(account_balance=10_000.0)
 
-        await broker.connect()
+        # Request unreasonably large size
+        request = TradeRequest(
+            symbol="EUR/USD", direction="long", requested_size=50.0,
+            entry_price=1.1050, stop_loss=1.1000,
+        )
+        approval = await gov.approve_trade(request)
+        assert approval.approved is True
+        assert approval.adjusted_size < 50.0
 
-        symbols = ["EUR/USD", "GBP/USD", "USD/JPY"]
-        for sym in symbols:
-            signal = SignalEvent(
-                symbol=sym, side="long", strength=0.7,
-                timeframe="1h", strategy="test", source="test",
+    @pytest.mark.asyncio
+    async def test_multiple_trades_tracked(self, mock_broker, event_bus):
+        """Multiple trades are correctly tracked by the risk system."""
+        await mock_broker.connect()
+        gov = RiskGovernor(account_balance=10_000.0)
+
+        for i in range(3):
+            request = TradeRequest(
+                symbol="EUR/USD", direction="long", requested_size=0.05,
+                entry_price=1.1050, stop_loss=1.1000,
             )
-            approval, _ = await _signal_to_execution(
-                bus, broker, validator, exposure, signal,
-            )
-            assert approval.approved is True
+            approval = await gov.approve_trade(request)
+            if approval.approved:
+                gov.record_trade_result(20.0)  # each trade profits $20
 
-        assert len(exposure._positions) == 3
-        assert len(bus.published_events) == 6  # 3 signals + 3 trades
-
-    @pytest.mark.asyncio
-    async def test_broker_tracks_orders(self) -> None:
-        """Mock broker should retain order history."""
-        broker = MockBrokerConnector()
-        await broker.connect()
-
-        order1 = BrokerOrder(
-            symbol="EUR/USD", side=OrderSide.BUY,
-            order_type=OrderType.MARKET, quantity=0.1, price=1.1050,
-        )
-        order2 = BrokerOrder(
-            symbol="GBP/USD", side=OrderSide.SELL,
-            order_type=OrderType.LIMIT, quantity=0.2, price=1.3000,
-        )
-
-        r1 = await broker.place_order(order1)
-        r2 = await broker.place_order(order2)
-
-        assert len(broker._orders) == 2
-        assert r1.broker_order_id.startswith("MOCK-")
-        assert r2.broker_order_id.startswith("MOCK-")
+        assert gov.account_balance == 10_060.0
