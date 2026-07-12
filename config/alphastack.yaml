@@ -1,0 +1,129 @@
+# =============================================================================
+# AlphaStack – Default Configuration
+# =============================================================================
+# This file is loaded at startup and can be overridden by environment variables.
+# Environment variable format: ALPHASTACK_<SECTION>_<KEY> (uppercased)
+# Example: ALPHASTACK_DB_HOST=10.0.0.5
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Runtime environment: dev | staging | prod
+# -----------------------------------------------------------------------------
+env: dev
+
+# -----------------------------------------------------------------------------
+# Database (PostgreSQL)
+# -----------------------------------------------------------------------------
+db:
+  host: localhost
+  port: 5432
+  name: alphastack
+  user: alphastack
+  password: alphastack          # Override via DB_PASSWORD env var
+  pool_size: 20                 # Connection pool size
+  max_overflow: 10              # Extra connections beyond pool_size
+  pool_timeout: 30              # Seconds to wait for a connection
+  echo: false                   # Log all SQL (noisy – dev only)
+
+# -----------------------------------------------------------------------------
+# Redis
+# -----------------------------------------------------------------------------
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: null                # Override via REDIS_PASSWORD env var
+  ssl: false
+  pool_size: 20
+  stream_max_len: 100000        # Max entries per stream (approximate)
+  cache_default_ttl: 300        # Default cache TTL in seconds
+
+# -----------------------------------------------------------------------------
+# Broker – MetaTrader 5
+# -----------------------------------------------------------------------------
+mt5:
+  login: 0                      # MT5 account login number
+  password: ""                  # Override via MT5_PASSWORD env var
+  server: ""                    # e.g. "MetaQuotes-Demo"
+  path: ""                      # Path to terminal64.exe (auto-detect if empty)
+  timeout: 60000                # Connection timeout in ms
+
+# -----------------------------------------------------------------------------
+# Broker – CCXT (crypto exchanges)
+# -----------------------------------------------------------------------------
+ccxt:
+  exchange: binance             # Default exchange
+  api_key: ""                   # Override via CCXT_API_KEY env var
+  secret: ""                    # Override via CCXT_SECRET env var
+  passphrase: null              # Some exchanges require a passphrase
+  sandbox: false                # Use exchange sandbox/testnet
+
+# -----------------------------------------------------------------------------
+# LLM / AI Configuration
+# -----------------------------------------------------------------------------
+llm:
+  openai_api_key: null          # Override via LLM_OPENAI_API_KEY env var
+  anthropic_api_key: null       # Override via LLM_ANTHROPIC_API_KEY env var
+  default_model: gpt-4o         # Default LLM model
+  temperature: 0.1              # Low temp for deterministic outputs
+  max_tokens: 4096
+
+# -----------------------------------------------------------------------------
+# Market Data Feeds
+# -----------------------------------------------------------------------------
+feeds:
+  polygon_api_key: null         # Override via FEED_POLYGON_API_KEY env var
+  alpha_vantage_api_key: null   # Override via FEED_ALPHA_VANTAGE_API_KEY env var
+  finnhub_api_key: null         # Override via FEED_FINNHUB_API_KEY env var
+
+# -----------------------------------------------------------------------------
+# Risk Management
+# -----------------------------------------------------------------------------
+risk:
+  max_drawdown_pct: 15.0        # Max allowed drawdown (%)
+  max_position_size_pct: 5.0    # Max single position as % of equity
+  max_daily_loss_pct: 3.0       # Max daily loss before halt (%)
+  max_open_positions: 10        # Concurrent open position limit
+  max_correlation: 0.7          # Max cross-position correlation
+  max_leverage: 2.0             # Max allowed leverage
+  stop_loss_atr_multiplier: 2.0 # Default SL = ATR × multiplier
+  risk_free_rate: 0.05          # For Sharpe/Sortino calculations
+
+# -----------------------------------------------------------------------------
+# API Server (FastAPI)
+# -----------------------------------------------------------------------------
+api:
+  host: 0.0.0.0
+  port: 8000
+  workers: 4
+  cors_origins:
+    - http://localhost:3000      # Frontend dev server
+  api_prefix: /api/v1
+  debug: false                  # Enable debug mode (noisy – dev only)
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+logging:
+  level: INFO                   # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  json_output: true             # JSON lines (false = coloured console)
+  log_dir: logs                 # Directory for trade & app log files
+
+# -----------------------------------------------------------------------------
+# Symbols & Timeframes
+# -----------------------------------------------------------------------------
+trading:
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - EUR/USD
+    - AAPL
+    - SPY
+  timeframes:
+    - 1m
+    - 5m
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+  default_timeframe: 1h
