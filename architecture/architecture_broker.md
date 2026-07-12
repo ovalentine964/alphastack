@@ -1,5 +1,11 @@
 # Alpha Stack — Broker Abstraction Layer Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_broker_connection.md`](../research/research_broker_connection.md), [`research/research_hybrid_broker_architecture.md`](../research/research_hybrid_broker_architecture.md), [`research/research_multi_broker_integration.md`](../research/research_multi_broker_integration.md) — Broker connection, hybrid broker architecture, and multi-broker integration
+> **Status:** Architecture Complete
+
+---
+
 **Author:** Broker Integration Architect
 **Date:** 2026-07-11
 **Status:** Architecture Design

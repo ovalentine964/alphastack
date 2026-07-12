@@ -1,5 +1,11 @@
 # Alpha Stack — Broker Routing Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_hybrid_broker_routing.md`](../research/research_hybrid_broker_routing.md) — Hybrid broker routing architecture
+> **Status:** Architecture Complete
+
+---
+
 > **Document Type:** System Architecture Design
 > **Version:** 1.0
 > **Date:** 2026-07-11

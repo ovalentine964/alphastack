@@ -1,5 +1,11 @@
 # Alpha Stack — Mobile Application UI Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/platform/research_mobile_app.md`](../research/platform/research_mobile_app.md) — Mobile application architecture research
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Mobile UI Architect  
 > **Framework:** Flutter (Dart) · **Platforms:** Android + iOS (any phone)  
 > **Scope:** Complete mobile UI architecture — dashboard, charts, trading, notifications, settings, agent monitoring, biometrics, offline mode, widgets, voice, low-data mode  

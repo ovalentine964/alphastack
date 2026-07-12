@@ -1,5 +1,11 @@
 # Alpha Stack — Desktop Application UI Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/platform/research_12_desktop_app_architecture.md`](../research/platform/research_12_desktop_app_architecture.md) — Desktop app architecture (Tauri-based)
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** Desktop UI Architect  
 > **Date:** 2026-07-11  
 > **Version:** 1.0  

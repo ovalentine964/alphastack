@@ -1,5 +1,11 @@
 # Alpha Stack — Curriculum Integration Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/curriculum/research_curriculum_ml_ai.md`](../research/curriculum/research_curriculum_ml_ai.md) — ML/AI curriculum — integration architecture
+> **Status:** Architecture Complete
+
+---
+
 > **Role:** Integration Curriculum Architect  
 > **Date:** 2026-07-11  
 > **Purpose:** Connect ALL of Valentine's coursework (Economics + Statistics + Math + CS + Finance) into one integrated system — ensuring nothing is missing and everything drives the code.  

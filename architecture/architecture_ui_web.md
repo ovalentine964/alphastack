@@ -1,5 +1,11 @@
 # Alpha Stack — Web Application UI Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/platform/research_web_app.md`](../research/platform/research_web_app.md) — Web application architecture research
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** Web UI Architect
 > **Date:** 2026-07-11
 > **Version:** 1.0

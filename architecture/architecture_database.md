@@ -1,5 +1,11 @@
 # Alpha Stack — Database Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_data_sources.md`](../research/research_data_sources.md), [`research/research_02_tech_stack_architecture.md`](../research/research_02_tech_stack_architecture.md) — Data sources and tech stack research — database design
+> **Status:** Architecture Complete
+
+---
+
 **Author:** Database Architect
 **Date:** 2026-07-11
 **Status:** Architecture Design — Pre-Implementation

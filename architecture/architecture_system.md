@@ -1,5 +1,11 @@
 # Alpha Stack — System Architecture Document
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_02_tech_stack_architecture.md`](../research/research_02_tech_stack_architecture.md), [`research/research_01_crypto_forex_trading_bot_landscape.md`](../research/research_01_crypto_forex_trading_bot_landscape.md) — Tech stack architecture and crypto/forex trading bot landscape
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** System Architect Agent
 > **Scope:** Complete system architecture for institutional-grade AI forex/crypto trading platform
 > **Design Philosophy:** Start at $7, scale to institutional — every module is designed for both extremes

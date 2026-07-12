@@ -1,5 +1,11 @@
 # Alpha Stack — Pair-Specific Strategy Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/market/research_07_trading_pairs.md`](../research/market/research_07_trading_pairs.md) (partial) — Trading pairs analysis — pair-specific strategies are architect innovation
+> **Status:** Architecture Complete
+
+---
+
 **Version:** 1.0  
 **Date:** 2026-07-11  
 **Scope:** Deep adaptation of the Alpha Strategy (Steps 1–16) to each trading pair's unique market personality  

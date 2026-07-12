@@ -1,5 +1,11 @@
 # Alpha Stack — Crypto-Specific Trading Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/market/research_07_trading_pairs.md`](../research/market/research_07_trading_pairs.md), [`research/market/research_market_microstructure.md`](../research/market/research_market_microstructure.md) — Trading pairs analysis and market microstructure
+> **Status:** Architecture Complete
+
+---
+
 **Version:** 1.0  
 **Date:** 2026-07-11  
 **Author:** Crypto Integration Architect  

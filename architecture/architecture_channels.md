@@ -1,5 +1,11 @@
 # Alpha Stack — Channel & Notification Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** None — Architectural decision by design team
+> **Status:** Architecture Complete
+
+---
+
 > **"Institutional-grade visibility, from your pocket."**
 > Every signal, trade, decision, and risk event — delivered to wherever the trader is.
 

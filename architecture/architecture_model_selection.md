@@ -1,5 +1,11 @@
 # Alpha Stack — Model Selection & Access Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** None — Architectural decision by design team
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11  
 > **Purpose:** Define how traders of every budget access AI models — from $0 to enterprise — optimized for forex/crypto trading workflows.
 

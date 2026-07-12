@@ -1,4 +1,10 @@
 # Alpha Stack — Strategy Flow Architecture
+
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/strategy/strategy_enhancement_steps1to4.md`](../research/strategy/strategy_enhancement_steps1to4.md) through [`steps13to16.md`](../research/strategy/strategy_enhancement_steps13to16.md) — VMPM 16-step strategy flow — market data to execution
+> **Status:** Architecture Complete
+
+---
 ## Complete 16-Step Data Flow: Market Data → Signal → Execution → Journal
 
 **Date:** 2026-07-11

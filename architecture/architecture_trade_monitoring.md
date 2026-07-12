@@ -1,5 +1,11 @@
 # Alpha Stack — Trade Monitoring Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** Cross-cutting — trade monitoring informed by risk and strategy research
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Trade Monitoring Architect
 > **Scope:** Real-time tracking of all trading activity, P&L, positions, performance, and anomaly detection
 > **Design Philosophy:** If it isn't measured, it isn't managed. Every tick, every trade, every decision — recorded, analyzed, surfaced.

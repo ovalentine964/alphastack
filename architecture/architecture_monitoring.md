@@ -1,5 +1,11 @@
 # Alpha Stack — Monitoring Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** Cross-cutting — operational monitoring informed by deployment and risk research
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** System Monitoring Architect
 > **Date:** 2026-07-11
 > **Status:** Architecture Design — Pre-Implementation

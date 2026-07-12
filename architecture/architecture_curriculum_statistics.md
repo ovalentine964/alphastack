@@ -1,5 +1,11 @@
 # Architecture: Statistics Curriculum → Alpha Stack Module Wiring
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/curriculum/research_curriculum_ml_ai.md`](../research/curriculum/research_curriculum_ml_ai.md) — ML/AI curriculum — statistics module wiring
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** Statistics Curriculum Architect Agent  
 > **Date:** 2026-07-11  
 > **Purpose:** Map every concept from Valentine's 13 statistics units (STA 142–STA 444) to specific Alpha Stack modules, agents, and code-level components. This is the implementation blueprint — not a research report, but an engineering specification.

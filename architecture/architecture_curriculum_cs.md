@@ -1,5 +1,11 @@
 # Architecture: Valentine's CS/IT Curriculum → Alpha Stack Module Wiring
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/curriculum/research_curriculum_ml_ai.md`](../research/curriculum/research_curriculum_ml_ai.md) — ML/AI curriculum — CS/IT module wiring
+> **Status:** Architecture Complete
+
+---
+
 > **System:** Alpha Stack — Institutional-Grade AI Forex/Crypto Trading System
 > **Role:** Computer Science Curriculum Architect
 > **Date:** 2026-07-11

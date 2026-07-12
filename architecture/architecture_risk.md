@@ -1,5 +1,11 @@
 # Alpha Stack — Risk Management Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_financial_crises.md`](../research/research_financial_crises.md), [`research/research_market_microstructure.md`](../research/research_market_microstructure.md) — Financial crises analysis and market microstructure
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Risk Management Architect
 > **Scope:** Institutional-grade risk management system for the Alpha Stack trading engine
 > **Design Philosophy:** Survive first, profit second. Every risk limit is a hard wall, not a suggestion.

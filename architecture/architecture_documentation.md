@@ -1,5 +1,11 @@
 # Alpha Stack — Documentation Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** None — Architectural decision by design team
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Documentation Architect Agent
 > **Scope:** Complete documentation system design — structure, content, tooling, versioning, CI/CD, and maintenance
 > **Design Philosophy:** Documentation is a product, not an afterthought. Every doc has an owner, an audience, and an expiry review.

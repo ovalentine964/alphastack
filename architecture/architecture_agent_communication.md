@@ -1,5 +1,11 @@
 # Alpha Stack — Agent Communication Protocol
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_03_loop_multiagent_systems.md`](../research/research_03_loop_multiagent_systems.md) — Multi-agent systems — agent communication protocol
+> **Status:** Architecture Complete
+
+---
+
 **Date:** 2026-07-11
 **Version:** 1.0
 **Status:** Architecture Design — Ready for Implementation Review

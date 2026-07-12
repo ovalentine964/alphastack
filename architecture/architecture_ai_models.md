@@ -1,5 +1,11 @@
 # Alpha Stack — AI/ML Model Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/curriculum/research_curriculum_ml_ai.md`](../research/curriculum/research_curriculum_ml_ai.md) — ML/AI curriculum and model selection research
+> **Status:** Architecture Complete
+
+---
+
 **Date:** 2026-07-11
 **Version:** 1.0
 **Status:** Architecture Design — Ready for Implementation Review

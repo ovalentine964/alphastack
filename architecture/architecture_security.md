@@ -1,5 +1,11 @@
 # Alpha Stack — Security Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/security/research_regulatory.md`](../research/security/research_regulatory.md), [`research/security/research_quantum_unsolved.md`](../research/security/research_quantum_unsolved.md) — Regulatory compliance and quantum-resilient security
+> **Status:** Architecture Complete
+
+---
+
 > **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Security Architect Agent
 > **Scope:** Complete security architecture — authentication, encryption, API security, quantum-resistant cryptography, credential isolation, audit logging, and penetration testing
 > **Design Philosophy:** Zero-trust by default, defense-in-depth everywhere, quantum-ready from day one

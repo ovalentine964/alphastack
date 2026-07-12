@@ -1,5 +1,11 @@
 # Alpha Stack — Data Storage Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_data_sources.md`](../research/research_data_sources.md), [`research/tech/research_data_sources.md`](../research/tech/research_data_sources.md) — Data sources and data pipeline research
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** Data Storage Architect  
 > **Date:** 2026-07-11  
 > **Status:** Architecture Design — Pre-Implementation  

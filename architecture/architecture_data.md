@@ -1,5 +1,11 @@
 # Alpha Stack — Data Pipeline Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_data_sources.md`](../research/research_data_sources.md) — Data sources research — data pipeline architecture
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** Data Architect  
 > **Date:** 2026-07-11  
 > **Status:** Architecture Design — Pre-Implementation  

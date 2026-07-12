@@ -1,5 +1,11 @@
 # Alpha Stack — Economics Curriculum Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/curriculum/research_curriculum_ml_ai.md`](../research/curriculum/research_curriculum_ml_ai.md) — ML/AI curriculum — economics module wiring
+> **Status:** Architecture Complete
+
+---
+
 **Author:** Economics Curriculum Architect
 **Date:** 2026-07-11
 **Status:** Architecture Design

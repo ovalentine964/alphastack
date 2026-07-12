@@ -1,5 +1,11 @@
 # Alpha Stack — Backtesting Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/strategy/strategy_enhancement_steps1to4.md`](../research/strategy/strategy_enhancement_steps1to4.md) through [`steps13to16.md`](../research/strategy/strategy_enhancement_steps13to16.md) — Strategy enhancement steps — same pipeline, different data source principle
+> **Status:** Architecture Complete
+
+---
+
 **Author:** Backtesting Architect
 **Date:** 2026-07-11
 **Version:** 1.0

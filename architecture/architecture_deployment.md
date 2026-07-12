@@ -1,5 +1,11 @@
 # Alpha Stack — Deployment Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_scalability.md`](../research/research_scalability.md) — Scalability research and 5-phase scaling roadmap
+> **Status:** Architecture Complete
+
+---
+
 > **Author:** Deployment Architect
 > **Date:** 2026-07-11
 > **Status:** Architecture Design — Pre-Implementation
