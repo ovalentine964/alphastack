@@ -45,7 +45,7 @@ The Alpha Stack memory system is a **4-layer architecture** (Working → Short-T
 |---|-----------|-----------|
 | **P1** | **Every memory has a lifecycle** | No data lives forever without review. TTL, decay, archival, and deletion are first-class concepts. |
 | **P2** | **Bounded by default** | Every data structure has a maximum size. Unbounded growth is a bug, not a feature. |
-| **P3** | **Memory drives decisions** | The VMPM pipeline must reference historical context. Memory-blind decisions repeat known mistakes. |
+| **P3** | **Memory drives decisions** | The AlphaStack pipeline must reference historical context. Memory-blind decisions repeat known mistakes. |
 | **P4** | **Statistical rigor** | No weight adjustment without significance testing. No pattern claim without minimum sample size. |
 | **P5** | **Closed learning loop** | Every trade feeds back into knowledge. The system compounds experience over time. |
 | **P6** | **Graceful degradation** | Memory loss (Redis crash, DB corruption) must not stop trading. The system operates conservatively without memory. |
@@ -160,7 +160,7 @@ The Alpha Stack memory system is a **4-layer architecture** (Working → Short-T
 │         └──────────────────┴──────────────────┘                   │
 │                            │                                      │
 │                            ▼                                      │
-│                    VMPM Pipeline (Steps 1-16)                     │
+│                    AlphaStack Pipeline (Steps 1-16)                     │
 │                    with Memory Augmentation                       │
 └────────────────────────────┬────────────────────────────────────┘
                              │
@@ -414,7 +414,7 @@ The closed learning loop is the core mechanism by which the system improves over
 TRADE EPISODE                                    CLOSED LEARNING LOOP
 ──────────────                                   ────────────────────
 
-1. Signal generated (VMPM Steps 1-16)
+1. Signal generated (AlphaStack Steps 1-16)
 2. Trade executed
 3. Trade managed (partials, trailing)
 4. Trade closed
@@ -472,7 +472,7 @@ TRADE EPISODE                                    CLOSED LEARNING LOOP
 │  STEP 5: APPLY                     │                              │
 │                                    │                              │
 │  Next trade benefits:              │                              │
-│  • Memory-augmented VMPM pipeline  │                              │
+│  • Memory-augmented AlphaStack pipeline  │                              │
 │  • Relevant episodes loaded        │                              │
 │  • Refined parameters applied      │                              │
 │  • Patterns with confidence scores │                              │
@@ -612,19 +612,19 @@ Data is stored to the appropriate layer:
 
 ### 5.6 Step 5: Apply — Memory-Augmented Decisions
 
-The VMPM pipeline is augmented with memory retrieval:
+The AlphaStack pipeline is augmented with memory retrieval:
 
 ```python
 class MemoryAugmentedPipeline:
     """
-    VMPM pipeline with memory-augmented decision points.
+    AlphaStack pipeline with memory-augmented decision points.
     """
 
     def run_analysis(self, instrument: str, timeframe: str) -> StrategyContext:
         # Create working memory context
         ctx = self.memory.create_context(instrument, timeframe)
 
-        # Steps 1-8: Standard VMPM pipeline
+        # Steps 1-8: Standard AlphaStack pipeline
         ctx = self.step1_market_structure(ctx)
         ctx = self.step2_market_bias(ctx)
         # ... steps 3-8 ...
@@ -2093,7 +2093,7 @@ NEW TRADE DECISION REQUEST
                   │
                   ▼
 ┌──────────────────────────────────────┐
-│  2. Run VMPM Steps 1-8              │
+│  2. Run AlphaStack Steps 1-8              │
 │     (Standard analysis pipeline)     │
 └─────────────────┬────────────────────┘
                   │
@@ -2119,7 +2119,7 @@ NEW TRADE DECISION REQUEST
                   │
                   ▼
 ┌──────────────────────────────────────┐
-│  5. Run VMPM Steps 9-14             │
+│  5. Run AlphaStack Steps 9-14             │
 │     (Memory-augmented decisions)     │
 │     • Step 10: Use pattern confidence│
 │     • Step 11: Use drawdown state    │
@@ -2451,7 +2451,7 @@ maintenance_schedule:
 | 9 | Implement episode embedding generation | `EpisodeEmbedder`, `episode_embeddings` table |
 | 10 | Implement hybrid semantic search | `SemanticSearchService`, pgvector indexes |
 | 10 | Implement Memory Context Loader | `get_memory_context()` API, context injection |
-| 11 | Memory-augmented VMPM pipeline (Steps 9-14) | Pipeline integration with memory retrieval |
+| 11 | Memory-augmented AlphaStack pipeline (Steps 9-14) | Pipeline integration with memory retrieval |
 | 11 | Implement concept drift detection | `DriftDetectorSystem`, Page-Hinkley, HMM |
 | 12 | Implement drift response actions | Confidence reduction, prior reset, alerts |
 | 12 | End-to-end integration testing | Full loop: trade → reflect → store → retrieve → decide |

@@ -72,7 +72,7 @@ The documentation architecture is **well-designed and comprehensive in scope** �
 | Architecture overview outline | ✅ Excellent | Maps directly to 7-layer system architecture |
 | Event system docs outline | ✅ Good | Stream definitions, schemas, adding new events |
 | Contributing guide outline | ✅ Good | Fork, setup, standards, PR process, ADRs |
-| VMPM pipeline internals outline | ✅ Good | Module interface, adding steps, config |
+| AlphaStack pipeline internals outline | ✅ Good | Module interface, adding steps, config |
 | Module interface contract | ✅ Excellent | Full ABC with `initialize`, `process`, `get_state`, `shutdown` |
 | Code standards | ✅ Good | Python, Rust, TypeScript conventions defined |
 
@@ -80,7 +80,7 @@ The documentation architecture is **well-designed and comprehensive in scope** �
 
 | Gap | Severity | Description |
 |-----|----------|-------------|
-| **Module internals (deep dives)** | HIGH | Only VMPM pipeline has an outline; risk engine, broker connector, data pipeline, multi-agent internals are listed but not written |
+| **Module internals (deep dives)** | HIGH | Only AlphaStack pipeline has an outline; risk engine, broker connector, data pipeline, multi-agent internals are listed but not written |
 | **Agent orchestration docs** | HIGH | LangGraph integration, agent communication protocol, adding new agents — all referenced in architecture but no developer docs |
 | **Data models reference** | HIGH | Pydantic models (MarketEvent, SignalEvent, TradeOrder, etc.) defined in trading engine arch but not in developer docs |
 | **Event schema auto-generation** | MEDIUM | Script referenced (`generate_api_reference.py`) but doesn't exist |
@@ -147,7 +147,7 @@ The documentation architecture is **well-designed and comprehensive in scope** �
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Strategy overview | ✅ Excellent | VMPM philosophy, why 16 steps, the edge explained |
+| Strategy overview | ✅ Excellent | AlphaStack philosophy, why 16 steps, the edge explained |
 | S1 (Fundamental Intelligence) | ✅ Excellent | Full content: architecture, components, inputs, outputs, config, tuning |
 | Pair strategy template | ✅ Excellent | XAU/USD example with pair personality, adjustments, pitfalls |
 | Step documentation template | ✅ Good | Consistent structure: purpose, internals, inputs, outputs, config, tuning |
@@ -162,10 +162,10 @@ The documentation architecture is **well-designed and comprehensive in scope** �
 | **S2-S16 individual step docs** | HIGH | Only S1 is fully written; S2-S16 have outlines in the architecture but not in strategy docs format |
 | **Pair-specific guides (beyond XAU/USD)** | HIGH | BTC/USD, EUR/USD, GBP/USD, GBP/JPY — all listed but none written |
 | **Backtesting guide** | HIGH | Architecture has full backtesting engine design, but no user-facing "how to backtest" guide |
-| **Strategy parameter tuning guide** | MEDIUM | How to adjust VMPM parameters for different market conditions |
+| **Strategy parameter tuning guide** | MEDIUM | How to adjust AlphaStack parameters for different market conditions |
 | **Walk-forward optimization guide** | MEDIUM | Code exists in architecture, no user-facing guide |
 | **Monte Carlo simulation guide** | MEDIUM | Code exists in architecture, no user-facing guide |
-| **Strategy comparison docs** | LOW | How VMPM compares to other approaches (for user confidence) |
+| **Strategy comparison docs** | LOW | How AlphaStack compares to other approaches (for user confidence) |
 | **Historical performance** | MEDIUM | No documented backtest results or historical performance data |
 | **Strategy versioning** | MEDIUM | How strategy changes are versioned, tested, and deployed |
 | **ML model accuracy docs** | MEDIUM | Documented accuracy targets (e.g., sweep classifier >75%) but no actual results |
@@ -243,7 +243,7 @@ The system architecture (`architecture_system.md`) and trading engine architectu
 | Architecture Component | Doc Coverage | Gap |
 |----------------------|:-----------:|-----|
 | 7-Layer System Architecture | ✅ Covered | Developer arch overview |
-| VMPM 16-Step Pipeline | ✅ Well covered | S1 detailed, S2-S16 outlined |
+| AlphaStack 16-Step Pipeline | ✅ Well covered | S1 detailed, S2-S16 outlined |
 | Multi-Agent System | ⚠️ Partial | Agent orchestration docs missing |
 | Event Bus (Redis Streams) | ✅ Covered | Stream definitions documented |
 | Broker Connector Abstraction | ⚠️ Partial | Interface defined, connector guides missing |

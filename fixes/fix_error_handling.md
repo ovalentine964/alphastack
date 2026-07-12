@@ -9,7 +9,7 @@
 
 ## Table of Contents
 
-1. [C1 — VMPM Pipeline Per-Step Error Handling](#c1--vmpm-pipeline-per-step-error-handling)
+1. [C1 — AlphaStack Pipeline Per-Step Error Handling](#c1--alphastack-pipeline-per-step-error-handling)
 2. [C2 — LLM API Failure Handling](#c2--llm-api-failure-handling)
 3. [C3 — Event Bus Grace Period](#c3--event-bus-grace-period)
 4. [C4 — Circuit Breaker State Persistence](#c4--circuit-breaker-state-persistence)
@@ -18,15 +18,15 @@
 
 ---
 
-## C1 — VMPM Pipeline Per-Step Error Handling
+## C1 — AlphaStack Pipeline Per-Step Error Handling
 
 ### Problem
 
-The VMPM 16-step pipeline has no per-step error handling. A single LLM timeout or exception in any step stalls or crashes the entire pipeline. There is no timeout enforcement, no fallback strategy, and no partial-failure mechanism.
+The AlphaStack 16-step pipeline has no per-step error handling. A single LLM timeout or exception in any step stalls or crashes the entire pipeline. There is no timeout enforcement, no fallback strategy, and no partial-failure mechanism.
 
 ### Root Cause
 
-The `VMPMStep` abstract base class defines only `analyze()` with no error contract, timeout, or failure strategy.
+The `AlphaStackStep` abstract base class defines only `analyze()` with no error contract, timeout, or failure strategy.
 
 ### Fix: StepErrorHandler System
 
@@ -85,7 +85,7 @@ class StepResult:
 
 ```python
 class StepErrorHandler:
-    """Handles errors for individual VMPM pipeline steps."""
+    """Handles errors for individual AlphaStack pipeline steps."""
 
     def __init__(self, cache_store):
         self.cache_store = cache_store  # Redis or in-memory cache
@@ -93,7 +93,7 @@ class StepErrorHandler:
 
     async def execute_step(
         self,
-        step: 'VMPMStep',
+        step: 'AlphaStackStep',
         context: 'StrategyContext',
         config: StepConfig,
     ) -> StepResult:
@@ -123,7 +123,7 @@ class StepErrorHandler:
 
                 # Cache successful result
                 self.cache_store.set(
-                    f"vmpm_cache:{config.name}",
+                    f"alphastack_cache:{config.name}",
                     result,
                     ttl=config.cache_ttl_seconds,
                 )
@@ -152,7 +152,7 @@ class StepErrorHandler:
         execution_time = (time.monotonic() - start_time) * 1000
 
         if config.failure_strategy == FailureStrategy.USE_CACHED:
-            cached = self.cache_store.get(f"vmpm_cache:{config.name}")
+            cached = self.cache_store.get(f"alphastack_cache:{config.name}")
             if cached is not None:
                 return StepResult(
                     step_name=config.name,
@@ -194,8 +194,8 @@ class StepErrorHandler:
 #### 4. Pipeline Orchestrator with Per-Step Error Handling
 
 ```python
-class VMPMPipelineOrchestrator:
-    """Orchestrates the 16-step VMPM pipeline with per-step error handling."""
+class AlphaStackPipelineOrchestrator:
+    """Orchestrates the 16-step AlphaStack pipeline with per-step error handling."""
 
     # Step configurations — each step defines its own error behavior
     STEP_CONFIGS = [
@@ -217,7 +217,7 @@ class VMPMPipelineOrchestrator:
         StepConfig(name="final_signal", timeout_seconds=5, failure_strategy=FailureStrategy.ABORT_PIPELINE, is_critical=True),
     ]
 
-    def __init__(self, steps: list['VMPMStep'], cache_store, logger):
+    def __init__(self, steps: list['AlphaStackStep'], cache_store, logger):
         self.steps = {s.name: s for s in steps}
         self.handler = StepErrorHandler(cache_store)
         self.logger = logger
@@ -283,10 +283,10 @@ class VMPMPipelineOrchestrator:
         context.reasoning_chain.append(entry)
 ```
 
-#### 5. Updated VMPMStep Base Class
+#### 5. Updated AlphaStackStep Base Class
 
 ```python
-class VMPMStep(ABC):
+class AlphaStackStep(ABC):
     """Updated abstract base class with error handling contract."""
 
     @abstractmethod
@@ -1560,7 +1560,7 @@ class DataPipelineCatchUp:
     3. Validate fetched data (outlier check, gap check)
     4. Fill gaps in TimescaleDB
     5. Recalculate affected indicators
-    6. Optionally re-run VMPM pipeline for missed signals
+    6. Optionally re-run AlphaStack pipeline for missed signals
     """
 
     def __init__(self, broker_client, db_client, indicator_engine, logger, metrics):
@@ -1617,13 +1617,13 @@ class DataPipelineCatchUp:
             end=gap_end,
         )
 
-        # Step 5: Optionally re-run VMPM for missed signals
+        # Step 5: Optionally re-run AlphaStack for missed signals
         signals = []
         if recalculate_signals:
             # Only re-run for gaps < 1 hour to avoid expensive re-computation
             gap_duration = (gap_end - gap_start).total_seconds()
             if gap_duration < 3600:
-                signals = await self._rerun_vmpm(pair, timeframe, gap_start, gap_end)
+                signals = await self._rerun_alphastack(pair, timeframe, gap_start, gap_end)
             else:
                 self.logger.info(
                     f"Gap too large ({gap_duration}s) for signal recalculation"
@@ -1653,9 +1653,9 @@ class DataPipelineCatchUp:
             validated.append(candle)
         return validated
 
-    async def _rerun_vmpm(self, pair, timeframe, start, end):
-        """Re-run VMPM pipeline for a gap period."""
-        # Implementation depends on VMPM pipeline interface
+    async def _rerun_alphastack(self, pair, timeframe, start, end):
+        """Re-run AlphaStack pipeline for a gap period."""
+        # Implementation depends on AlphaStack pipeline interface
         pass
 
 
@@ -1668,13 +1668,13 @@ class CatchUpResult:
     error: Optional[str] = None
 ```
 
-#### 4. Integration with VMPM Pipeline
+#### 4. Integration with AlphaStack Pipeline
 
 ```python
-class DataAwareVMPMPipeline:
-    """VMPM pipeline that checks data freshness before executing."""
+class DataAwareAlphaStackPipeline:
+    """AlphaStack pipeline that checks data freshness before executing."""
 
-    def __init__(self, pipeline: VMPMPipelineOrchestrator, freshness: DataFreshnessMonitor):
+    def __init__(self, pipeline: AlphaStackPipelineOrchestrator, freshness: DataFreshnessMonitor):
         self.pipeline = pipeline
         self.freshness = freshness
 
@@ -1721,7 +1721,7 @@ class DataAwareVMPMPipeline:
 - EXPIRED data: halt new trades, manage existing
 - DEAD data: close positions and halt (for critical streams only)
 - Automatic catch-up procedure after recovery with data validation
-- VMPM pipeline data-quality-aware — warns about degraded data in reasoning chain
+- AlphaStack pipeline data-quality-aware — warns about degraded data in reasoning chain
 
 ---
 
@@ -2356,12 +2356,12 @@ class CredentialRotationManager:
 
 ## Implementation Checklist
 
-### C1 — VMPM Pipeline Error Handling
+### C1 — AlphaStack Pipeline Error Handling
 - [ ] Define `FailureStrategy` enum
 - [ ] Define `StepConfig` dataclass with per-step configuration
 - [ ] Implement `StepErrorHandler` with timeout, retry, and fallback
-- [ ] Update `VMPMStep` base class with validation contract
-- [ ] Implement `VMPMPipelineOrchestrator` with per-step error handling
+- [ ] Update `AlphaStackStep` base class with validation contract
+- [ ] Implement `AlphaStackPipelineOrchestrator` with per-step error handling
 - [ ] Define default `STEP_CONFIGS` for all 16 pipeline steps
 - [ ] Add reasoning chain logging for all fallbacks
 - [ ] Add signal quality circuit breaker (from review H4)
@@ -2399,7 +2399,7 @@ class CredentialRotationManager:
 - [ ] Define actions per freshness level (alert / use_cached / halt / close)
 - [ ] Implement `DataPipelineCatchUp` with broker API fetch
 - [ ] Add data validation during catch-up
-- [ ] Integrate freshness awareness into VMPM pipeline
+- [ ] Integrate freshness awareness into AlphaStack pipeline
 
 ### C6 — Infrastructure DR
 - [ ] Deploy Redis Sentinel (3 sentinels, 1 master, 2 replicas)
@@ -2437,7 +2437,7 @@ Phase 1 (Core Safety — implement first):
 └── C2: LLM API failure handling (prevents agent crashes)
 
 Phase 2 (Pipeline Resilience):
-├── C1: VMPM pipeline error handling (prevents pipeline stalls)
+├── C1: AlphaStack pipeline error handling (prevents pipeline stalls)
 └── C5: Data pipeline failure recovery (prevents stale data trading)
 
 Phase 3 (Infrastructure):

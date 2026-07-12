@@ -14,7 +14,7 @@
 
 1. [Alpha Stack Vision & Mission](#1-alpha-stack-vision--mission)
 2. [Market Opportunity](#2-market-opportunity)
-3. [Alpha Strategy — Enhanced VMPM Flow](#3-alpha-strategy--enhanced-vmpm-flow)
+3. [Alpha Strategy — Enhanced AlphaStack Flow](#3-alpha-strategy--enhanced-alphastack-flow)
 4. [Technology Stack Recommendation](#4-technology-stack-recommendation)
 5. [Multi-Platform Architecture](#5-multi-platform-architecture)
 6. [Multi-Agent System Design](#6-multi-agent-system-design)
@@ -128,9 +128,9 @@
 
 ---
 
-## 3. Alpha Strategy — Enhanced VMPM Flow
+## 3. Alpha Strategy — Enhanced AlphaStack Flow
 
-### 3.1 The 16-Step Enhanced VMPM (Volatility-Modified Propulsion Model) Flow
+### 3.1 The 16-Step Enhanced AlphaStack (Volatility-Modified Propulsion Model) Flow
 
 Alpha Stack's strategy engine follows a structured 16-step flow that combines academic rigor with practical execution:
 

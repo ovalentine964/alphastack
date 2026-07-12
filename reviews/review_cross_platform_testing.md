@@ -99,7 +99,7 @@ The testing strategy (`architecture_testing.md`) is **comprehensive for the back
 
 There are **no cross-platform integration tests** defined. The testing architecture covers:
 
-- **Backend integration tests** (Event Bus, Data Pipeline, VMPM Pipeline, Risk→Execution) — well-defined ✅
+- **Backend integration tests** (Event Bus, Data Pipeline, AlphaStack Pipeline, Risk→Execution) — well-defined ✅
 - **Broker integration tests** (MT5, CCXT) — well-defined ✅
 - **Cross-platform tests** (Section 9) — only defines platform matrix and CI workflows, not actual integration tests
 

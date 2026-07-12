@@ -35,7 +35,7 @@ However, the prior scalability review (`review_8_scalability.md`) identified 3 c
 |-----------|---------------|---------|-------|
 | **PostgreSQL 16 + TimescaleDB** | Docker, single instance | ✅ YES | Hypertables, compression, continuous aggregates all work on single node |
 | **Redis 7** | Docker, single instance, 128MB | ✅ YES | Pub/Sub + Streams for event bus, AOF persistence |
-| **VMPM 16-step pipeline** | Python asyncio on single machine | ✅ YES | Single pair (EUR/USD), ~50-200ms per pipeline run |
+| **AlphaStack 16-step pipeline** | Python asyncio on single machine | ✅ YES | Single pair (EUR/USD), ~50-200ms per pipeline run |
 | **MT5 via Wine** | Local machine | 🟡 FRAGILE | Works but Wine on Linux is inherently unstable. Documented risk. |
 | **Docker Compose** | Local machine | ✅ YES | All services co-located, environment variables for config |
 | **Config files (JSON/YAML)** | No MongoDB | ✅ YES | Appropriate for 1 strategy, <10 config files |
@@ -128,7 +128,7 @@ The `fix_platform_consolidation.md` introduces the Alpha Stack Server as a unifi
 
 **🟠 HIGH: Phase 2 VPS (Hetzner CX31: 4 CPU, 8GB RAM) is undersized.**
 
-The prior review identified that 10 pairs × VMPM pipeline × LLM inference requires more resources:
+The prior review identified that 10 pairs × AlphaStack pipeline × LLM inference requires more resources:
 - FinBERT inference: ~2GB RAM
 - Redis + PostgreSQL + TimescaleDB + trading engine: ~4GB baseline
 - 10 pairs × concurrent pipeline: significant CPU
@@ -269,7 +269,7 @@ Key observations:
 
 #### 🟠 Bottleneck 2: LLM Inference Latency — No Fallback
 
-**Problem:** The VMPM pipeline has 4+ LLM-dependent steps (S1, S2, S3, S7). Each call takes 50-200ms. For 10 pairs running concurrently, this creates a 6-second sequential bottleneck or significant parallel resource contention.
+**Problem:** The AlphaStack pipeline has 4+ LLM-dependent steps (S1, S2, S3, S7). Each call takes 50-200ms. For 10 pairs running concurrently, this creates a 6-second sequential bottleneck or significant parallel resource contention.
 
 **Evidence from architecture:**
 - `architecture_system.md`: LLM calls are on the critical path

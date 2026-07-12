@@ -626,7 +626,7 @@ CREATE INDEX idx_reconciliation_log_status ON reconciliation_log (status) WHERE 
 
 ### Problem
 
-Steps S1, S2, S3, S7 of the VMPM pipeline depend on LLM inference. No fallback exists for API outages. No caching exists for repeated inputs. No timeout handling exists. At 10+ pairs, this is the dominant bottleneck and cost driver.
+Steps S1, S2, S3, S7 of the AlphaStack pipeline depend on LLM inference. No fallback exists for API outages. No caching exists for repeated inputs. No timeout handling exists. At 10+ pairs, this is the dominant bottleneck and cost driver.
 
 ### Solution
 
@@ -923,7 +923,7 @@ async def rule_fallback_s7(prompt: str, context: dict) -> str:
     })
 ```
 
-### Integration with VMPM Pipeline
+### Integration with AlphaStack Pipeline
 
 ```python
 # In pipeline initialization:

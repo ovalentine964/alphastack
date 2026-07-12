@@ -1713,5 +1713,5 @@ The system maintains a real-time dashboard per pair:
 ---
 
 *Document generated for Alpha Stack — Pair-Specific Strategy Architecture*
-*Part of the VMPM (Volatility-Mapped Price Movement) Strategy Framework*
+*Part of the AlphaStack (Volatility-Mapped Price Movement) Strategy Framework*
 *Version 1.0 — 2026-07-11*

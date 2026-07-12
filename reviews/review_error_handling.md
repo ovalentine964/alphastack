@@ -8,13 +8,13 @@
 
 ## Executive Summary
 
-The Alpha Stack has an **exceptionally strong** error handling architecture for a trading system. The layered defense model (position → portfolio → regime → system), the four-layer circuit breaker cascade, and the broker disconnection fixes are all well-designed and largely complete. However, there are **12 material gaps** that should be addressed before live capital deployment, ranging from missing error propagation in the VMPM pipeline to incomplete disaster recovery documentation.
+The Alpha Stack has an **exceptionally strong** error handling architecture for a trading system. The layered defense model (position → portfolio → regime → system), the four-layer circuit breaker cascade, and the broker disconnection fixes are all well-designed and largely complete. However, there are **12 material gaps** that should be addressed before live capital deployment, ranging from missing error propagation in the AlphaStack pipeline to incomplete disaster recovery documentation.
 
 **Overall Grade: B+ (Strong, with specific gaps)**
 
 | Category | Grade | Notes |
 |----------|-------|-------|
-| Error catching at every layer | B | Strong at L0-L2, gaps in L3 (VMPM pipeline) and L4 (agent orchestration) |
+| Error catching at every layer | B | Strong at L0-L2, gaps in L3 (AlphaStack pipeline) and L4 (agent orchestration) |
 | Circuit breaker cascading | A- | Four-layer design is correct; minor reset race conditions |
 | Disaster recovery completeness | B- | Good broker failover; missing infrastructure DR, data recovery, and partial state recovery |
 | Failure mode documentation | A- | Extensive; missing ~4 scenarios in agent/orchestration layer |
@@ -32,17 +32,17 @@ The Alpha Stack has an **exceptionally strong** error handling architecture for 
 | **L0** | Infrastructure | ✅ Strong | A | Docker health checks, Prometheus alerts, log aggregation (Loki) |
 | **L1** | Data Foundation | ✅ Strong | A- | Gap detector, outlier filter, cross-source validation, quality gates |
 | **L2** | Execution & Broker | ✅ Strong | A | Full Broker Health Manager with 6 fixes (adaptive timeout, failover, zombie detection, reconciliation, degraded state, partial disconnect) |
-| **L3** | Strategy & Analysis | ⚠️ Gaps | C+ | VMPM pipeline has no per-step error handling, no timeout enforcement, no fallback for LLM failures |
+| **L3** | Strategy & Analysis | ⚠️ Gaps | C+ | AlphaStack pipeline has no per-step error handling, no timeout enforcement, no fallback for LLM failures |
 | **L4** | Orchestration | ⚠️ Gaps | B- | Agent crash recovery undefined; event bus failure recovery is "close all" (too aggressive); no agent health monitoring |
 | **L5** | API Gateway | ✅ Moderate | B | JWT auth, rate limiting, CORS — but no circuit breaker for external API calls |
 | **L6** | Presentation | ⚠️ Minimal | C | No offline mode, no degraded UI state, no reconnection UX |
 
-### 1.2 Critical Finding: VMPM Pipeline Error Handling
+### 1.2 Critical Finding: AlphaStack Pipeline Error Handling
 
-The VMPM 16-step pipeline defines a `VMPMStep` abstract base class but has **no error handling contract**:
+The AlphaStack 16-step pipeline defines a `AlphaStackStep` abstract base class but has **no error handling contract**:
 
 ```python
-class VMPMStep(ABC):
+class AlphaStackStep(ABC):
     @abstractmethod
     async def analyze(self, context: StrategyContext) -> StepResult:
         pass
@@ -138,7 +138,7 @@ The `CircuitBreakerSystem` stores breaker states in memory (`self.breaker_states
 
 **Issue 3: Missing Circuit Breaker for Strategy Pipeline**
 
-There is no circuit breaker for the VMPM pipeline itself. If the pipeline starts producing consistently bad signals (all rejected by risk agent), there's no automatic throttle. The system will keep running expensive LLM calls that produce rejected signals.
+There is no circuit breaker for the AlphaStack pipeline itself. If the pipeline starts producing consistently bad signals (all rejected by risk agent), there's no automatic throttle. The system will keep running expensive LLM calls that produce rejected signals.
 
 **Recommendation:** Add a "signal quality" circuit breaker:
 - If >80% of signals are rejected by risk agent in the last 50 signals → pause pipeline for 1 hour
@@ -326,7 +326,7 @@ class DataPipelineRecovery:
         # 2. Fetch missing data from broker API
         # 3. Validate and fill gaps
         # 4. Recalculate affected indicators
-        # 5. Re-run VMPM pipeline for missed signals
+        # 5. Re-run AlphaStack pipeline for missed signals
 ```
 
 ---
@@ -336,7 +336,7 @@ class DataPipelineRecovery:
 ### 6.1 Error Propagation Paths
 
 ```
-VMPM Step Failure
+AlphaStack Step Failure
     │
     ├─→ [UNDEFINED] Pipeline continues with missing data?
     ├─→ [UNDEFINED] Pipeline aborts?
@@ -369,7 +369,7 @@ Event Bus Failure
 
 | Origin | Destination | Gap | Risk |
 |--------|------------|-----|------|
-| VMPM Step → Pipeline | No error propagation contract | Silent failures produce bad signals |
+| AlphaStack Step → Pipeline | No error propagation contract | Silent failures produce bad signals |
 | LLM → Agent | No error handling wrapper | Agent crashes on API failure |
 | Agent → Agent | No message delivery guarantee | Lost events during brief outages |
 | Risk Rejection → Strategy | No feedback loop | Strategy doesn't learn from rejections |
@@ -383,7 +383,7 @@ Event Bus Failure
 
 | # | Gap | Impact | Recommendation |
 |---|-----|--------|---------------|
-| **C1** | VMPM pipeline has no per-step error handling | Silent failures, pipeline stalls | Add `StepErrorHandler` with timeout, fallback, and partial failure handling |
+| **C1** | AlphaStack pipeline has no per-step error handling | Silent failures, pipeline stalls | Add `StepErrorHandler` with timeout, fallback, and partial failure handling |
 | **C2** | LLM API failures have no handling | Agent crashes, silent failures | Add `LLMCallWrapper` with retries, validation, fallback model, circuit breaker |
 | **C3** | Event bus failure triggers "close all" (too aggressive) | Unnecessary position closures on brief Redis blips | Add local buffer, degraded mode, 60s threshold before close-all |
 | **C4** | Breaker states not persisted across restarts | System forgets crisis state on crash | Persist to Redis; load on startup |
@@ -421,7 +421,7 @@ Event Bus Failure
 ```
 IMMEDIATE (Before any live trading):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Add VMPM pipeline error handling (StepErrorHandler)
+1. Add AlphaStack pipeline error handling (StepErrorHandler)
 2. Add LLM API call wrapper with circuit breaker
 3. Soften event bus failure response (buffer → degrade → close-all)
 4. Persist circuit breaker states to Redis
@@ -464,7 +464,7 @@ If the 6 critical gaps (C1-C6) are not fixed before live deployment:
 
 | Scenario | Probability | Impact | Risk |
 |----------|------------|--------|------|
-| LLM timeout stalls VMPM pipeline during NFP | Medium | High — missed exit on losing position | **HIGH** |
+| LLM timeout stalls AlphaStack pipeline during NFP | Medium | High — missed exit on losing position | **HIGH** |
 | Redis blip closes all positions unnecessarily | Medium | Medium — realized losses on winning positions | **MEDIUM** |
 | System restarts during drawdown, forgets crisis state | Low | Critical — resumes full-size trading during active drawdown | **CRITICAL** |
 | Data pipeline fails, system trades on stale data | Medium | High — entries at wrong prices | **HIGH** |

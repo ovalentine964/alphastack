@@ -18,16 +18,16 @@ The Alpha Stack architecture demonstrates **strong foundational scalability desi
 
 ## 1. Pair Scalability: 1 Pair → 10+ Pairs
 
-### 1.1 VMPM Pipeline Per-Pair Execution
+### 1.1 AlphaStack Pipeline Per-Pair Execution
 
 | Aspect | Assessment | Verdict |
 |--------|-----------|---------|
-| Pipeline parallelism | Each pair runs an independent 16-step VMPM pipeline. Steps are async (`asyncio`). | ✅ PASS |
+| Pipeline parallelism | Each pair runs an independent 16-step AlphaStack pipeline. Steps are async (`asyncio`). | ✅ PASS |
 | Strategy context isolation | `StrategyContext` is per-pair, per-analysis. No cross-pair state leakage. | ✅ PASS |
 | ML model sharing | FinBERT, regime classifier, S/R model are shared across pairs. Inference is stateless. | ✅ PASS |
 | Resource contention | At 10+ pairs, concurrent ML inference + 16 pipeline steps × N pairs = significant CPU/memory. | 🟡 MEDIUM |
 
-**Finding:** The VMPM pipeline is architecturally parallelizable (each pair gets its own `StrategyContext`), but the system document does not specify concurrency limits or backpressure mechanisms.
+**Finding:** The AlphaStack pipeline is architecturally parallelizable (each pair gets its own `StrategyContext`), but the system document does not specify concurrency limits or backpressure mechanisms.
 
 **Risk:** With 10 pairs × 16 steps × ~50-200ms per LLM-dependent step, a single Python `asyncio` event loop could saturate. The architecture uses `Python asyncio` for orchestration (L4), which is single-threaded.
 
@@ -198,7 +198,7 @@ Phase 4: Patroni-based HA cluster
 | Cost | $15/mo — reasonable for the capital level. | ✅ PASS |
 
 **Finding:** The Phase 2 VPS specification (4 CPU, 8GB RAM) is undersized for the described workload:
-- 10 pairs × VMPM pipeline × LLM inference = significant CPU
+- 10 pairs × AlphaStack pipeline × LLM inference = significant CPU
 - FinBERT inference requires ~2GB RAM
 - Redis + PostgreSQL + TimescaleDB + trading engine = ~4GB baseline
 - Total: ~6-7GB baseline, leaving <1GB headroom
@@ -246,7 +246,7 @@ Phase 4: Patroni-based HA cluster
 ### 5.1 Critical Path Latency Analysis
 
 ```
-Market Data → VMPM Pipeline (Steps 1-16) → Risk Agent → Execution Agent → Order Manager → Broker
+Market Data → AlphaStack Pipeline (Steps 1-16) → Risk Agent → Execution Agent → Order Manager → Broker
   ~5ms           ~50-200ms (LLM steps)       ~5ms           ~5ms            ~10ms        ~50-200ms
   
 Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
@@ -262,7 +262,7 @@ Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
 
 ### 5.2 LLM Inference Bottleneck (CRITICAL PATH)
 
-**Finding:** The VMPM pipeline has **at least 4 LLM-dependent steps** (Steps 1, 2, 3, 7 per the trading engine architecture). Each LLM call takes 50-200ms. For a single pair, this is manageable. For 10 pairs running concurrently:
+**Finding:** The AlphaStack pipeline has **at least 4 LLM-dependent steps** (Steps 1, 2, 3, 7 per the trading engine architecture). Each LLM call takes 50-200ms. For a single pair, this is manageable. For 10 pairs running concurrently:
 
 - Sequential: 10 pairs × 4 steps × 150ms = **6 seconds** (unacceptable)
 - Parallel (asyncio): 4 steps × 150ms = **600ms** (acceptable, but GIL contention on model loading)

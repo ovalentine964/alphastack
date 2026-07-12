@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-The Alpha Stack architecture is **ambitious, well-structured, and largely coherent** across the two core documents and supporting architecture files. The system design demonstrates strong engineering thinking — particularly in risk management, the VMPM pipeline abstraction, and the scaling roadmap. However, this review identifies **3 critical issues, 7 significant gaps, 4 redundancies, and 6 architectural risks** that should be addressed before implementation begins.
+The Alpha Stack architecture is **ambitious, well-structured, and largely coherent** across the two core documents and supporting architecture files. The system design demonstrates strong engineering thinking — particularly in risk management, the AlphaStack pipeline abstraction, and the scaling roadmap. However, this review identifies **3 critical issues, 7 significant gaps, 4 redundancies, and 6 architectural risks** that should be addressed before implementation begins.
 
 **Overall Coherence Score: 7.2 / 10** — Good foundation, needs targeted fixes.
 
@@ -31,7 +31,7 @@ The Alpha Stack architecture is **ambitious, well-structured, and largely cohere
 | Document | Size | Coverage |
 |----------|------|----------|
 | `architecture_system.md` | 98KB | Full system architecture: layers, modules, data flow, deployment, scaling |
-| `architecture_trading_engine.md` | 113KB | Deep dive: 16 VMPM steps, signal flow, broker integration, backtesting, live trading |
+| `architecture_trading_engine.md` | 113KB | Deep dive: 16 AlphaStack steps, signal flow, broker integration, backtesting, live trading |
 | `architecture_risk.md` | 126KB | Risk management: position sizing, drawdown, circuit breakers, black swan |
 | `architecture_broker_routing.md` | 62KB | Smart order routing, broker scoring, failover, arbitrage detection |
 | `architecture_data_storage.md` | 88KB | TimescaleDB, PostgreSQL, Redis, MongoDB, retention, backup |
@@ -42,7 +42,7 @@ The Alpha Stack architecture is **ambitious, well-structured, and largely cohere
 | Document | Expected Content | Impact |
 |----------|-----------------|--------|
 | `architecture_multi_agent.md` | Standalone multi-agent orchestration, LangGraph state machines, agent lifecycle | **HIGH** — Multi-agent details are scattered across system and trading engine docs. No single source of truth for agent orchestration. |
-| `architecture_strategy_flow.md` | Standalone VMPM pipeline flow, step-to-step data contracts | **MEDIUM** — Strategy flow is well-covered in trading_engine.md. Redundant doc not strictly needed. |
+| `architecture_strategy_flow.md` | Standalone AlphaStack pipeline flow, step-to-step data contracts | **MEDIUM** — Strategy flow is well-covered in trading_engine.md. Redundant doc not strictly needed. |
 | `architecture_agent_communication.md` | Standalone agent communication protocol, message schemas, routing | **MEDIUM** — Communication is covered in system.md §5 and trading_engine.md §5.2, but message schemas are inconsistent between the two. |
 
 **Verdict:** The three missing docs are **not blockers** — their content is adequately (if not perfectly) covered in the existing documents. However, the inconsistency in agent communication schemas between system.md and trading_engine.md is a real issue that would have been caught if a dedicated communication doc existed.
@@ -57,8 +57,8 @@ The system architecture defines a clear 6-layer model (L0–L6). Cross-referenci
 
 | Module | Declared Dependencies | Actually Connected? | Issues |
 |--------|----------------------|---------------------|--------|
-| **VMPM Pipeline (L3)** | Market data, ML models, all strategy steps | ✅ Yes | Well-defined StrategyContext flows through all 16 steps |
-| **Strategy Agent (L4)** | VMPM Pipeline, Event Bus | ✅ Yes | Agent wraps pipeline, publishes to `signals.*` streams |
+| **AlphaStack Pipeline (L3)** | Market data, ML models, all strategy steps | ✅ Yes | Well-defined StrategyContext flows through all 16 steps |
+| **Strategy Agent (L4)** | AlphaStack Pipeline, Event Bus | ✅ Yes | Agent wraps pipeline, publishes to `signals.*` streams |
 | **Risk Agent (L4)** | Risk Engine, Portfolio State | ✅ Yes | Risk Governor is well-defined with hard limits |
 | **News Agent (L4)** | FinBERT, LLM, News APIs | ✅ Yes | S1 module handles this in trading_engine.md |
 | **Execution Agent (L4)** | Order Manager, Brokers | ✅ Yes | UOM → BCA → Broker chain is clear |
@@ -115,12 +115,12 @@ No single document defines the **canonical state store** for portfolio state, po
 | Flow | Start | End | Complete? | Dead Ends? |
 |------|-------|-----|-----------|------------|
 | **Market Data Ingestion** | MT5/CCXT/OANDA | TimescaleDB + Redis cache | ✅ Yes | None |
-| **Signal Generation** | Market data → VMPM 1-16 | TradeProposal | ✅ Yes | None |
+| **Signal Generation** | Market data → AlphaStack 1-16 | TradeProposal | ✅ Yes | None |
 | **Risk Check** | TradeProposal → Risk Governor | Approved/Rejected | ✅ Yes | None |
 | **Order Execution** | Approved order → UOM → BCA → Broker | Fill confirmation | ✅ Yes | None |
 | **Trade Management** | Fill → S14/S15 monitoring | Exit/SL/TP adjustment | ✅ Yes | None |
 | **Journal Recording** | Fill/Exit events → S16 | Journal entry in DB | ✅ Yes | None |
-| **Feedback Loop** | Journal → RL Agent → Strategy Adaptation | ⚠️ Partial | **DEAD END** — RL agent recommendations have no clear path back to modify VMPM parameters |
+| **Feedback Loop** | Journal → RL Agent → Strategy Adaptation | ⚠️ Partial | **DEAD END** — RL agent recommendations have no clear path back to modify AlphaStack parameters |
 | **News → Strategy** | News feed → FinBERT → Sentiment event | Strategy Agent consumes | ✅ Yes | None |
 | **Client Data Push** | Strategy signals → WebSocket → Client | ⚠️ Partial | WebSocket server defined but client subscription model unclear |
 
@@ -128,7 +128,7 @@ No single document defines the **canonical state store** for portfolio state, po
 
 **DEAD END D-1: RL Agent → Strategy Parameter Update**
 
-The trading engine (S16) describes an RL agent that generates trade management recommendations and compares optimal vs actual decisions. However, there is **no defined mechanism** for these recommendations to actually modify VMPM strategy parameters.
+The trading engine (S16) describes an RL agent that generates trade management recommendations and compares optimal vs actual decisions. However, there is **no defined mechanism** for these recommendations to actually modify AlphaStack strategy parameters.
 
 The system.md says "Strategy as Data" (YAML config), but there's no:
 - API endpoint to update strategy config
@@ -183,7 +183,7 @@ Alerts go to Telegram/Grafana, but there's no defined:
 | Component | Current State | What's Missing |
 |-----------|--------------|----------------|
 | **LangGraph State Machine** | Referenced in system.md as orchestration tool. Trading engine uses "Agent Orchestrator" generically. | No LangGraph graph definition, no state transitions, no conditional edges. This is the **core orchestration mechanism** and it's just a name drop. |
-| **LLM Integration Layer** | Multiple agents use LLMs (DeepSeek, Qwen). Each step in VMPM that uses LLM has its own description. | No unified LLM client, no token budget management, no fallback when LLM is slow/down, no prompt template management. |
+| **LLM Integration Layer** | Multiple agents use LLMs (DeepSeek, Qwen). Each step in AlphaStack that uses LLM has its own description. | No unified LLM client, no token budget management, no fallback when LLM is slow/down, no prompt template management. |
 | **Model Registry** | ML models referenced (FinBERT, HMM, XGBoost, CNN, RL). Training frequency defined. | No model versioning, no A/B testing framework for model updates, no model performance monitoring, no rollback on degraded model. |
 | **WebSocket Protocol** | WebSocket server defined in gateway. Trading engine pushes real-time data. | No WebSocket message protocol (what messages does the client receive?), no subscription model, no reconnection handling spec. |
 
@@ -272,7 +272,7 @@ Alerts go to Telegram/Grafana, but there's no defined:
 
 ### Risk R-1: LLM Dependency in Critical Path (SEVERITY: HIGH)
 
-**Description:** The VMPM pipeline uses LLMs in S1 (fundamental analysis), S2 (bias fusion), S10 (confluence reasoning), and S16 (journal analysis). LLMs have:
+**Description:** The AlphaStack pipeline uses LLMs in S1 (fundamental analysis), S2 (bias fusion), S10 (confluence reasoning), and S16 (journal analysis). LLMs have:
 - Variable latency (100ms to 30s+)
 - Cost that scales with usage
 - Availability dependencies on external APIs
@@ -310,7 +310,7 @@ This is acknowledged in system.md but the mitigation ("close all positions") is 
 
 **Mitigation:**
 - Define an explicit "MVP" that's 20% of the architecture delivering 80% of the value
-- Phase 1 should be: 1 pair, 1 broker, rule-based (no ML, no LLM), 5 core VMPM steps (S3, S4, S5, S8, S10), PostgreSQL + Redis
+- Phase 1 should be: 1 pair, 1 broker, rule-based (no ML, no LLM), 5 core AlphaStack steps (S3, S4, S5, S8, S10), PostgreSQL + Redis
 - Add complexity only after profitability is proven
 
 ### Risk R-4: Strategy-as-Data Without Validation (SEVERITY: MEDIUM)
@@ -429,7 +429,7 @@ The same parameter is represented as a decimal (0.02) in one place and a percent
 
 ## 10. Conclusion
 
-The Alpha Stack architecture is a **well-researched, ambitious design** that demonstrates strong domain knowledge in both trading systems and software architecture. The VMPM 16-step pipeline is a clever abstraction that makes the strategy auditable and modifiable. The risk management architecture is particularly strong — the layered defense model with hard limits is exactly right for a trading system.
+The Alpha Stack architecture is a **well-researched, ambitious design** that demonstrates strong domain knowledge in both trading systems and software architecture. The AlphaStack 16-step pipeline is a clever abstraction that makes the strategy auditable and modifiable. The risk management architecture is particularly strong — the layered defense model with hard limits is exactly right for a trading system.
 
 The primary weaknesses are:
 1. **Documentation fragmentation** — Key concepts (agents, risk, events) are defined differently across documents

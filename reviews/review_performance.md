@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-The Alpha Stack architecture is **well-designed for progressive scaling** but contains several **critical performance gaps** that will prevent the <5s tick-to-order target from being reliably achieved, especially under load. The biggest risks are: (1) LLM inference latency in the VMPM pipeline, (2) missing memory management for 24/7 operation, (3) insufficient WebSocket performance specifications, and (4) absent connection pooling strategy for broker connectors.
+The Alpha Stack architecture is **well-designed for progressive scaling** but contains several **critical performance gaps** that will prevent the <5s tick-to-order target from being reliably achieved, especially under load. The biggest risks are: (1) LLM inference latency in the AlphaStack pipeline, (2) missing memory management for 24/7 operation, (3) insufficient WebSocket performance specifications, and (4) absent connection pooling strategy for broker connectors.
 
 **Overall Verdict:** The architecture is **achievable for Phase 1–2** (latency-tolerant, single-pair trading) but requires **significant performance hardening** for Phase 3+ real-time multi-pair operation.
 
@@ -22,7 +22,7 @@ The Alpha Stack architecture is **well-designed for progressive scaling** but co
 The system architecture states the critical path as:
 
 ```
-Market Data → VMPM Pipeline (Steps 1-16) → Risk Agent → Execution Agent → Order Manager → Broker
+Market Data → AlphaStack Pipeline (Steps 1-16) → Risk Agent → Execution Agent → Order Manager → Broker
   ~5ms           ~50-200ms (LLM steps)       ~5ms           ~5ms            ~10ms        ~50-200ms
 
 Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
@@ -33,10 +33,10 @@ Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
 | Factor | Estimated Latency | Risk Level | Notes |
 |--------|-------------------|------------|-------|
 | Tick ingestion (WS/MT5) | 1–5ms | 🟢 Low | Well-understood, fast |
-| VMPM Steps 1–4 (Context) | 10–30ms | 🟢 Low | Mostly lookup/calculation |
-| VMPM Steps 5–8 (Structure) | 20–80ms | 🟡 Medium | Indicator calculations, S/R detection |
-| VMPM Steps 9–12 (Entry) | 20–50ms | 🟢 Low | Pattern matching, math |
-| **VMPM Steps involving LLM** | **200–2000ms** | 🔴 **Critical** | DeepSeek/Qwen API calls are unpredictable |
+| AlphaStack Steps 1–4 (Context) | 10–30ms | 🟢 Low | Mostly lookup/calculation |
+| AlphaStack Steps 5–8 (Structure) | 20–80ms | 🟡 Medium | Indicator calculations, S/R detection |
+| AlphaStack Steps 9–12 (Entry) | 20–50ms | 🟢 Low | Pattern matching, math |
+| **AlphaStack Steps involving LLM** | **200–2000ms** | 🔴 **Critical** | DeepSeek/Qwen API calls are unpredictable |
 | Risk Agent validation | 5–15ms | 🟢 Low | In-memory checks |
 | Execution Agent | 5–10ms | 🟢 Low | Routing logic |
 | Order Manager → Broker | 50–500ms | 🟠 High | Depends on broker; MT5 via ZMQ ~50ms, CCXT REST ~200-500ms |
@@ -56,7 +56,7 @@ Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
   - Whether LLM calls are on the critical path or pre-computed
 
 **🟠 RISK 2: 16 Sequential Steps Create Cumulative Latency**
-- The VMPM pipeline is strictly sequential (Step 1 → 2 → ... → 16).
+- The AlphaStack pipeline is strictly sequential (Step 1 → 2 → ... → 16).
 - Even if each step averages 30ms, 16 steps = 480ms minimum.
 - If any step calls an external service, the entire pipeline stalls.
 - **Mitigation:** Steps 5–8 (Structure) could run in parallel since they analyze different aspects of the same data.
@@ -74,7 +74,7 @@ Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
 | 1.1 | **Define per-step latency budgets** — e.g., Step 1 ≤ 100ms, total pipeline ≤ 1s | 🔴 Critical | Low |
 | 1.2 | **Move LLM calls off the critical path** — Pre-compute fundamental bias and sentiment periodically (every 1h/4h), not per-tick | 🔴 Critical | Medium |
 | 1.3 | **Add pipeline timeout circuit breaker** — If total pipeline exceeds 2s, abort and log | 🟠 High | Low |
-| 1.4 | **Parallelize independent VMPM steps** — Steps 5-8 can run concurrently | 🟡 Medium | Medium |
+| 1.4 | **Parallelize independent AlphaStack steps** — Steps 5-8 can run concurrently | 🟡 Medium | Medium |
 | 1.5 | **Use streaming LLM responses** — Start processing partial results rather than waiting for full completion | 🟡 Medium | Medium |
 | 1.6 | **Add warm-up / pre-warming** — Pre-load model weights, keep connections alive, cache common queries | 🟢 Low | Low |
 
@@ -150,7 +150,7 @@ The data storage architecture defines good indexes and hypertable designs, but s
 ### 3.3 Gaps
 
 **🟠 GAP 1: No Query Result Caching Layer**
-- Every VMPM step that needs "last 500 candles" hits TimescaleDB.
+- Every AlphaStack step that needs "last 500 candles" hits TimescaleDB.
 - For 10 pairs × 5 timeframes × 16 steps = 800 potential DB calls per signal cycle.
 - The architecture defines Redis as a cache (`ohlcv:{symbol}:{tf}` for current candle) but does NOT specify caching completed candle queries.
 - **Impact:** Unnecessary DB load, especially during high-frequency signal generation.
@@ -316,7 +316,7 @@ TICK ARRIVAL ──────────────────────�
      │                                                              │
      ▼                                                              ▼
 ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
-│ Ingestion│──▶│ VMPM    │──▶│  Risk   │──▶│Execution│──▶│ Broker  │
+│ Ingestion│──▶│ AlphaStack    │──▶│  Risk   │──▶│Execution│──▶│ Broker  │
 │ (5ms)   │   │Pipeline │   │  Agent  │   │  Agent  │   │  API    │
 │         │   │(50-2000)│   │ (5ms)   │   │ (5ms)   │   │(50-500) │
 └─────────┘   └────┬────┘   └─────────┘   └─────────┘   └─────────┘
@@ -332,8 +332,8 @@ TICK ARRIVAL ──────────────────────�
 
 | # | Bottleneck | Severity | Location | Impact |
 |---|-----------|----------|----------|--------|
-| **B1** | LLM API latency (DeepSeek/Qwen) | 🔴 Critical | VMPM Steps 1, possibly others | 200-2000ms, non-deterministic |
-| **B2** | Sequential VMPM pipeline | 🟠 High | VMPM Steps 1→16 | No parallelism, cumulative latency |
+| **B1** | LLM API latency (DeepSeek/Qwen) | 🔴 Critical | AlphaStack Steps 1, possibly others | 200-2000ms, non-deterministic |
+| **B2** | Sequential AlphaStack pipeline | 🟠 High | AlphaStack Steps 1→16 | No parallelism, cumulative latency |
 | **B3** | MT5 terminal (Wine on Linux) | 🟠 High | Broker connector | Wine adds ~10-50ms overhead; stability risk |
 | **B4** | Python GIL for CPU-bound work | 🟡 Medium | Indicator calculations | Limits true parallelism |
 | **B5** | Redis Pub/Sub fan-out | 🟡 Medium | Signal distribution | Single-threaded; slow consumers block |
@@ -361,7 +361,7 @@ TICK ARRIVAL ──────────────────────�
 **Mitigation architecture (recommended):**
 ```
 Instead of:
-  Tick → VMPM Step 1 (LLM call) → Step 2 → ... → Step 16 → Order
+  Tick → AlphaStack Step 1 (LLM call) → Step 2 → ... → Step 16 → Order
 
 Implement:
   ┌─ Pre-compute Layer (every 1-4h) ─────────────────────────┐
@@ -428,7 +428,7 @@ The architecture mentions Prometheus + Grafana but provides:
 ```
 # Trading path latency
 trading_tick_to_order_seconds{pair, broker} — histogram
-trading_vmpm_pipeline_seconds{pair, step} — histogram
+trading_alphastack_pipeline_seconds{pair, step} — histogram
 trading_risk_check_seconds — histogram
 trading_broker_latency_seconds{broker, order_type} — histogram
 
@@ -450,7 +450,7 @@ ws_fanout_latency_seconds — histogram
 
 If market data arrives faster than the system can process:
 - Tick stream grows unbounded in Redis
-- VMPM pipeline queue grows
+- AlphaStack pipeline queue grows
 - Orders may be placed on stale signals
 
 **No backpressure strategy is defined.** The system should:
@@ -484,7 +484,7 @@ If market data arrives faster than the system can process:
 | 5 | Add Redis query cache for candle data | 🟠 High | 1 | Low | Reduces DB load by 80%+ |
 | 6 | Define WebSocket SLAs and add backpressure | 🟠 High | 2 | Medium | Ensures real-time data reliability |
 | 7 | Use `uvloop` and binary serialization (MessagePack) | 🟠 High | 2 | Low | 2-5x throughput improvement |
-| 8 | Parallelize independent VMPM steps (1-4, 5-8) | 🟡 Medium | 2 | Medium | ~300ms latency reduction |
+| 8 | Parallelize independent AlphaStack steps (1-4, 5-8) | 🟡 Medium | 2 | Medium | ~300ms latency reduction |
 | 9 | Set `statement_timeout` and use prepared statements | 🟡 Medium | 1 | Low | Prevents runaway queries |
 | 10 | Define performance SLOs and Prometheus metrics | 🟡 Medium | 2 | Medium | Enables proactive performance management |
 

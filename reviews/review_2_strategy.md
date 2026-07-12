@@ -1,4 +1,4 @@
-# Strategy Validation Report — Alpha Stack VMPM
+# Strategy Validation Report — Alpha Stack AlphaStack
 
 **Date:** 2026-07-11
 **Reviewer:** Research Validation Agent (Strategy)

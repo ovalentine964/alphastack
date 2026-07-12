@@ -28,7 +28,7 @@
 | Principle | Description | Rationale |
 |-----------|-------------|-----------|
 | **Event-First** | Every module communicates via events, not direct calls | Decouples modules, enables replay/audit, scales horizontally |
-| **Strategy as Data** | VMPM strategy steps are configuration, not code | Swap strategies without re-deployment |
+| **Strategy as Data** | AlphaStack strategy steps are configuration, not code | Swap strategies without re-deployment |
 | **Fail-Safe by Default** | Every module assumes the module below it will fail | Graceful degradation, no cascading failures |
 | **Audit Everything** | Every decision, every order, every signal is logged with full reasoning chain | Institutional compliance, strategy improvement |
 | **Human Override Always** | Any automated decision can be overridden by a human at any stage | Safety, trust-building, regulatory compliance |
@@ -44,7 +44,7 @@
 │                                                                      │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
 │  │ Pipeline │    │  Event   │    │  Multi-  │    │  Layered │      │
-│  │ (VMPM    │ +  │  Driven  │ +  │  Agent   │ +  │  (Tiered │      │
+│  │ (AlphaStack    │ +  │  Driven  │ +  │  Agent   │ +  │  (Tiered │      │
 │  │  16-step)│    │  (Async) │    │  (Roles) │    │  Access) │      │
 │  └──────────┘    └──────────┘    └──────────┘    └──────────┘      │
 │                                                                      │
@@ -91,7 +91,7 @@
 │            │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │       │
 │            │  │Strategy │ │  Risk    │ │  News    │ │Execution  │  │       │
 │            │  │Agent    │ │  Agent   │ │  Agent   │ │Agent      │  │       │
-│            │  │(VMPM)   │ │          │ │          │ │           │  │       │
+│            │  │(AlphaStack)   │ │          │ │          │ │           │  │       │
 │            │  └────┬────┘ └────┬─────┘ └────┬─────┘ └─────┬─────┘  │       │
 │            │       │          │             │             │         │       │
 │            │  ┌────┴──────────┴─────────────┴─────────────┴─────┐   │       │
@@ -103,7 +103,7 @@
 │  LAYER 3: STRATEGY & ANALYSIS  │             │             │                  │
 │  ══════════════════╪══════════╪═════════════╪═════════════╪══════════════    │
 │            ┌───────┴──────────┴─────────────┴─────────────┴─────────┐       │
-│            │              VMPM STRATEGY PIPELINE                     │       │
+│            │              AlphaStack STRATEGY PIPELINE                     │       │
 │            │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐    │       │
 │            │  │ 1 │→│ 2 │→│ 3 │→│ 4 │→│ 5 │→│ 6 │→│ 7 │→│ 8 │    │       │
 │            │  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘    │       │
@@ -157,7 +157,7 @@
 | **L6** | Presentation | User interfaces, visualization, alerts | Tauri 2.x, React 19, Flutter 3.x |
 | **L5** | API Gateway | Authentication, rate limiting, request routing | FastAPI, WebSocket, gRPC |
 | **L4** | Orchestration | Multi-agent coordination, strategy execution, risk enforcement | LangGraph, Redis Streams, Python asyncio |
-| **L3** | Strategy & Analysis | VMPM 16-step pipeline, signal generation, ML inference | PyTorch, TA-Lib, Polars, Custom Rust |
+| **L3** | Strategy & Analysis | AlphaStack 16-step pipeline, signal generation, ML inference | PyTorch, TA-Lib, Polars, Custom Rust |
 | **L2** | Execution & Broker | Order management, broker abstraction, fill tracking | Python MT5 API, CCXT, ZeroMQ |
 | **L1** | Data Foundation | Market data storage, caching, analytics | TimescaleDB, Redis, ClickHouse |
 | **L0** | Infrastructure | Container orchestration, monitoring, logging, secrets | Docker, Prometheus, Grafana, Loki |
@@ -171,12 +171,12 @@
 ```
 alpha-stack/
 ├── core/                          # L3: Strategy & Analysis Engine
-│   ├── vmpm/                      # VMPM 16-step strategy pipeline
+│   ├── alphastack/                      # AlphaStack 16-step strategy pipeline
 │   │   ├── steps/                 # Individual strategy steps (1-16)
 │   │   ├── pipeline.py            # Pipeline orchestrator
 │   │   └── config/                # Strategy parameters (YAML)
 │   ├── agents/                    # Multi-agent definitions
-│   │   ├── strategy_agent.py      # VMPM execution agent
+│   │   ├── strategy_agent.py      # AlphaStack execution agent
 │   │   ├── risk_agent.py          # Risk management agent
 │   │   ├── news_agent.py          # News/sentiment agent
 │   │   ├── execution_agent.py     # Order execution agent
@@ -270,8 +270,8 @@ alpha-stack/
 
 | Module | Primary Responsibility | Input | Output | Dependencies |
 |--------|----------------------|-------|--------|--------------|
-| **VMPM Pipeline** | Execute 16-step strategy analysis | Market data, signals | Trade proposals | All strategy steps, ML models |
-| **Strategy Agent** | Orchestrate VMPM pipeline per instrument | Market events | Signal events | VMPM Pipeline, Event Bus |
+| **AlphaStack Pipeline** | Execute 16-step strategy analysis | Market data, signals | Trade proposals | All strategy steps, ML models |
+| **Strategy Agent** | Orchestrate AlphaStack pipeline per instrument | Market events | Signal events | AlphaStack Pipeline, Event Bus |
 | **Risk Agent** | Enforce risk limits, position sizing | Trade proposals | Approved/rejected proposals | Risk Engine, Portfolio State |
 | **News Agent** | Monitor news, score sentiment | News feeds | Sentiment events | FinBERT, LLM, News APIs |
 | **Execution Agent** | Execute approved orders | Approved orders | Fill confirmations | Order Manager, Brokers |
@@ -285,13 +285,13 @@ alpha-stack/
 
 ---
 
-### 3.3 VMPM Strategy Pipeline — Detailed Module Design
+### 3.3 AlphaStack Strategy Pipeline — Detailed Module Design
 
-The VMPM (Valentine Money Printing Machine) is a 16-step sequential pipeline. Each step is an independent module that receives context from previous steps and enriches it for downstream steps.
+The AlphaStack (Valentine Money Printing Machine) is a 16-step sequential pipeline. Each step is an independent module that receives context from previous steps and enriches it for downstream steps.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    VMPM 16-STEP STRATEGY PIPELINE                    │
+│                    AlphaStack 16-STEP STRATEGY PIPELINE                    │
 │                                                                      │
 │  PHASE A: CONTEXT (Steps 1-4)                                       │
 │  ┌───────┐   ┌───────┐   ┌───────┐   ┌───────┐                    │
@@ -339,8 +339,8 @@ The VMPM (Valentine Money Printing Machine) is a 16-step sequential pipeline. Ea
 **Each Step Module implements:**
 
 ```python
-class VMPMStep(ABC):
-    """Base class for all VMPM strategy steps."""
+class AlphaStackStep(ABC):
+    """Base class for all AlphaStack strategy steps."""
     
     @abstractmethod
     async def analyze(self, context: StrategyContext) -> StepResult:
@@ -465,7 +465,7 @@ class StrategyContext:
 | Agent | Loop Pattern | Rationale |
 |-------|-------------|-----------|
 | **Coordinator** | Orchestrator-Workers | Dynamically delegates to specialists based on market conditions |
-| **Strategy** | Plan-and-Execute | Plans analysis strategy, then executes VMPM steps |
+| **Strategy** | Plan-and-Execute | Plans analysis strategy, then executes AlphaStack steps |
 | **Risk** | ReAct | Continuously reasons about risk state, takes protective actions |
 | **News** | ReAct | Monitors feeds, reasons about impact, triggers alerts |
 | **Execution** | ReAct | Reasons about execution quality, adapts order strategy |
@@ -632,7 +632,7 @@ Economic Calendar ─────▶ Calendar Fetcher ─▶ Event ────�
 ### 4.2 Signal Generation Flow (Strategy → Decision)
 
 ```
-Market Data              VMPM Pipeline            Decision Layer
+Market Data              AlphaStack Pipeline            Decision Layer
 ───────────              ─────────────            ──────────────
 
 OHLCV + Ticks ──────┐
@@ -897,7 +897,7 @@ MONITORING (L0)      ───▶  ───▶   ───▶  ───▶  �
 
 **Critical Path (signal → execution):**
 ```
-Market Data → VMPM Pipeline (Steps 1-16) → Risk Agent → Execution Agent → Order Manager → Broker
+Market Data → AlphaStack Pipeline (Steps 1-16) → Risk Agent → Execution Agent → Order Manager → Broker
   ~5ms           ~50-200ms (LLM steps)       ~5ms           ~5ms            ~10ms        ~50-200ms
   
 Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
@@ -1095,7 +1095,7 @@ Total: ~125-425ms (forex), ~200-600ms (crypto with exchange latency)
 | **Pairs** | EUR/USD only | EUR/USD, GBP/USD, USD/JPY | 10-20 majors + crosses | 20+ forex + crypto | 50+ all asset classes |
 | **Brokers** | FXPesa MT5 | FXPesa MT5 | + CCXT (Binance/Bybit) | + OANDA, IBKR | + Prime brokerage, DMA |
 | **Timeframes** | H1, H4 | M15, H1, H4, D1 | M5, M15, H1, H4, D1 | M1, M5, M15, H1, H4, D1 | Full multi-TF |
-| **Strategies** | VMPM only | VMPM + basic news filter | VMPM + sentiment + regime | Multiple strategies | Strategy portfolio |
+| **Strategies** | AlphaStack only | AlphaStack + basic news filter | AlphaStack + sentiment + regime | Multiple strategies | Strategy portfolio |
 | **ML Models** | None → basic | FinBERT sentiment | + regime classifier, S/R ML | + RL TP optimizer, CNN patterns | + custom transformers |
 | **Database** | SQLite | PostgreSQL | TimescaleDB + Redis | + ClickHouse | + Kafka + distributed |
 | **Execution** | Market orders | + Limit orders | + Partial TPs | + TWAP (for >1 lot) | + SOR, dark pools |
@@ -1319,7 +1319,7 @@ $1M+:            Full institutional execution
 
 | Term | Definition |
 |------|-----------|
-| **VMPM** | Valentine Money Printing Machine — the core 16-step trading strategy |
+| **AlphaStack** | Valentine Money Printing Machine — the core 16-step trading strategy |
 | **UOM** | Unified Order Manager — single source of truth for all orders across brokers |
 | **BCA** | Broker Connector Abstraction — plugin interface for broker integrations |
 | **HITL** | Human-in-the-Loop — checkpoints requiring human approval |
@@ -1353,7 +1353,7 @@ system:
   timezone: "Africa/Nairobi"  # EAT for FXPesa
   
 strategy:
-  name: "vmpm"
+  name: "alphastack"
   version: "1.0"
   instruments: ["EUR/USD"]
   timeframes: ["H1", "H4", "D1"]

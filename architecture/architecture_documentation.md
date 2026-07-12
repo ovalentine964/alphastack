@@ -56,7 +56,7 @@ docs/
 │   └── internals/           # Deep dives into subsystems
 │
 ├── strategy/                # For traders who want to understand the AI
-│   ├── overview/            # VMPM philosophy, what alpha means
+│   ├── overview/            # AlphaStack philosophy, what alpha means
 │   ├── steps/               # Each of the 16 steps, detailed
 │   ├── pairs/               # Pair-specific behavior
 │   └── backtesting/         # How to validate strategies
@@ -128,7 +128,7 @@ Day 1:  Landing Page → What is Alpha Stack? → Quick Start (Docker)
         → First Signal Received → "What does this mean?" → Signal Explainer
 Day 3:  Configuration Guide → Set Risk Tolerance → Connect Broker
         → First Live Trade → Trade Journal Entry
-Day 7:  Strategy Overview → Understanding VMPM → Why Did I Get This Signal?
+Day 7:  Strategy Overview → Understanding AlphaStack → Why Did I Get This Signal?
 Day 14: Pair-Specific Guides → Adjust Parameters → Backtest My Config
 Day 30: Advanced Config → Multi-Pair Setup → Performance Review
 ```
@@ -155,7 +155,7 @@ Week 1:    SDK Usage → Error Handling → Rate Limit Management
 
 | From → To | User Guide | Dev Guide | Strategy | API | Deployment | Troubleshooting |
 |-----------|:----------:|:---------:|:--------:|:---:|:----------:|:---------------:|
-| **User Guide** | — | → internals | → VMPM overview | → CLI ref | → quickstart | → common issues |
+| **User Guide** | — | → internals | → AlphaStack overview | → CLI ref | → quickstart | → common issues |
 | **Dev Guide** | → config ref | — | → step interfaces | → OpenAPI | → dev env | → error codes |
 | **Strategy** | → signal guide | → module API | — | → signal events | — | → backtest issues |
 | **API** | → auth setup | → SDK source | → signal schema | — | → API deploy | → rate limits |
@@ -466,7 +466,7 @@ Alpha Stack is a hybrid event-driven, multi-agent, pipeline architecture.
 | L0 | Infrastructure | Docker, Prometheus, Grafana |
 | L1 | Data Foundation | TimescaleDB, Redis, ClickHouse |
 | L2 | Execution & Broker | MT5, CCXT, ZeroMQ |
-| L3 | Strategy & Analysis | VMPM Pipeline, PyTorch, Rust |
+| L3 | Strategy & Analysis | AlphaStack Pipeline, PyTorch, Rust |
 | L4 | Orchestration | LangGraph, Redis Streams |
 | L5 | API Gateway | FastAPI, WebSocket, gRPC |
 | L6 | Presentation | Tauri, React, Flutter |
@@ -580,10 +580,10 @@ Significant design decisions require an ADR:
 
 ### 4.3 Module Internals
 
-#### `developer/internals/vmpm-pipeline.md`
+#### `developer/internals/alphastack-pipeline.md`
 
 ```markdown
-# VMPM Pipeline Internals
+# AlphaStack Pipeline Internals
 
 ## Pipeline Architecture
 The 16-step pipeline is a directed acyclic graph (DAG) with conditional branching.
@@ -598,9 +598,9 @@ class StrategyModule(ABC):
 ```
 
 ## Adding a New Strategy Step
-1. Create `core/vmpm/steps/S17_your_module.py`
+1. Create `core/alphastack/steps/S17_your_module.py`
 2. Implement `StrategyModule` interface
-3. Register in `core/vmpm/pipeline.yaml`
+3. Register in `core/alphastack/pipeline.yaml`
 4. Add unit tests in `tests/steps/test_s17.py`
 5. Update strategy documentation
 
@@ -641,8 +641,8 @@ class StrategyModule(ABC):
 Alpha (α) is excess return — the return above what the market gives you for free.
 Alpha Stack's job is to find, capture, and compound alpha.
 
-## The VMPM Philosophy
-VMPM = Volatility-Modified Propulsion Model
+## The AlphaStack Philosophy
+AlphaStack = Volatility-Modified Propulsion Model
 - **Volatility-Modified:** Position sizes and targets adapt to current volatility
 - **Propulsion:** Price moves in bursts; we catch the bursts
 - **Model:** Systematic, rules-based, AI-enhanced — not guessing
@@ -1385,7 +1385,7 @@ The mobile app (Flutter) provides monitoring and alerts. The engine runs on a se
 | **MT5** | MetaTrader 5 — forex trading platform |
 | **REST** | Representational State Transfer — API style |
 | **WebSocket** | Persistent bidirectional connection |
-| **VMPM** | Volatility-Modified Propulsion Model |
+| **AlphaStack** | Volatility-Modified Propulsion Model |
 ```
 
 ---
@@ -1548,7 +1548,7 @@ nav:
     - Contributing:
       - developer/contributing/index.md
     - Internals:
-      - developer/internals/vmpm-pipeline.md
+      - developer/internals/alphastack-pipeline.md
       - developer/internals/risk-engine.md
   - API Reference:
     - REST: api/rest/index.md
@@ -2030,7 +2030,7 @@ A Grafana dashboard tracking:
 |------|-------------|--------|
 | Trading Guide | Complete user trading guide | 6 hours |
 | Configuration Reference | Full config documentation | 4 hours |
-| Strategy Overview | VMPM philosophy + flow | 4 hours |
+| Strategy Overview | AlphaStack philosophy + flow | 4 hours |
 | Steps 1-8 documentation | First 8 strategy steps | 8 hours |
 | REST API Reference | Auto-generated + manual guides | 6 hours |
 | FAQ + Glossary | Community docs | 3 hours |

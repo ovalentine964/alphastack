@@ -1804,7 +1804,7 @@ class NotificationInboxScreen extends ConsumerWidget {
 │                                         │
 │ STRATEGY CONFIGURATION                  │
 │ ┌─────────────────────────────────────┐ │
-│ │ Active Strategy: Alpha VMPM v1.0    │ │
+│ │ Active Strategy: Alpha AlphaStack v1.0    │ │
 │ │ Risk per trade: 2%                  │ │
 │ │ Max open positions: 3               │ │
 │ │ Trading pairs: EUR/USD, GBP/USD... │ │

@@ -24,10 +24,10 @@ The 4-layer model (Working → Short-Term → Long-Term → Episodic) is referen
 
 | Layer | What Exists | What's Missing |
 |-------|------------|----------------|
-| **Working** | StrategyContext dataclass (VMPM pipeline) with progressively enriched fields | No definition of working memory size limits, eviction policy, or serialization format |
+| **Working** | StrategyContext dataclass (AlphaStack pipeline) with progressively enriched fields | No definition of working memory size limits, eviction policy, or serialization format |
 | **Short-Term** | Redis hot cache (last 10K ticks, last 1000 candles per TF), active signals in Redis | No definition of what qualifies for promotion to long-term, no retention policy beyond TTL |
 | **Long-Term** | PostgreSQL (orders, journal), TimescaleDB (OHLCV), ClickHouse (analytics) | No unified query interface, no semantic indexing, no consolidation process defined |
-| **Episodic** | Trade journal entries (Step 16 of VMPM), Auditor Agent weekly review | No episodic retrieval mechanism, no similarity search, no context injection for future decisions |
+| **Episodic** | Trade journal entries (Step 16 of AlphaStack), Auditor Agent weekly review | No episodic retrieval mechanism, no similarity search, no context injection for future decisions |
 
 ### 1.2 Design Gaps
 
@@ -155,7 +155,7 @@ TRADE EPISODE                          LEARNING LOOP
 ─────────────                          ─────────────
 
 1. Signal generated                    ┌─ 5. POST-TRADE ANALYSIS
-   (VMPM Steps 1-16)                  │     - What worked?
+   (AlphaStack Steps 1-16)                  │     - What worked?
 2. Trade executed                      │     - What failed?
 3. Trade managed                       │     - What was unexpected?
 4. Trade closed                        │     - P&L attribution
@@ -181,7 +181,7 @@ TRADE EPISODE                          LEARNING LOOP
                                     - Update strategy parameters
                                     - Create reusable analysis template
                                     - Adjust risk limits for conditions
-                                    - Feed back into VMPM pipeline
+                                    - Feed back into AlphaStack pipeline
                                        │
                                        ▼
                                  9. NEXT SIMILAR SCENARIO
@@ -207,7 +207,7 @@ To implement the Hermes closed loop, Alpha Stack needs:
 
 ### 3.1 Current State: PARTIALLY, BUT NOT DESIGNED TO
 
-The VMPM pipeline (Steps 1-16) produces decisions based on **current market data only**. The `StrategyContext` dataclass has no fields for:
+The AlphaStack pipeline (Steps 1-16) produces decisions based on **current market data only**. The `StrategyContext` dataclass has no fields for:
 - Historical context ("what happened last time in similar conditions")
 - Past trade outcomes on this instrument
 - Learned patterns or adjusted parameters
@@ -232,7 +232,7 @@ The VMPM pipeline (Steps 1-16) produces decisions based on **current market data
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│              MEMORY-AUGMENTED VMPM PIPELINE                          │
+│              MEMORY-AUGMENTED AlphaStack PIPELINE                          │
 │                                                                      │
 │  Current Market Data ─────────────────────────────────┐             │
 │                                                       │             │
@@ -249,7 +249,7 @@ The VMPM pipeline (Steps 1-16) produces decisions based on **current market data
 │  └─────────────────────┘                              │             │
 │                                                       ▼             │
 │                                              ┌─────────────┐       │
-│                                              │ VMPM Steps  │       │
+│                                              │ AlphaStack Steps  │       │
 │                                              │ 1-16 with   │       │
 │                                              │ augmented   │       │
 │                                              │ context     │       │
@@ -401,14 +401,14 @@ The hybrid approach (structured tags for exact filtering + embeddings for semant
 | # | Risk | Probability | Impact | Mitigation |
 |---|------|------------|--------|------------|
 | **R1** | **No memory architecture exists** — system will be built without coherent memory design, leading to fragmented, inconsistent memory across agents | HIGH | CRITICAL | Create `architecture_memory.md` immediately. This review provides the foundation. |
-| **R2** | **Memory-blind decisions** — VMPM pipeline makes decisions without referencing historical context, repeating known mistakes | HIGH | HIGH | Implement Memory Retriever that injects relevant past episodes into StrategyContext before VMPM Steps 9-14. |
+| **R2** | **Memory-blind decisions** — AlphaStack pipeline makes decisions without referencing historical context, repeating known mistakes | HIGH | HIGH | Implement Memory Retriever that injects relevant past episodes into StrategyContext before AlphaStack Steps 9-14. |
 | **R3** | **Redis unbounded growth** — 24/7 operation with tick data, signals, and events filling Redis without proper TTL/MAXLEN | MEDIUM | HIGH | Enforce TTL on all keys. Use Redis Streams with MAXLEN. Monitor memory usage hourly. |
 | **R4** | **No learning loop** — system generates trades but doesn't systematically learn from outcomes | HIGH | HIGH | Implement the Hermes-inspired closed loop: Episode Recorder → Pattern Detector → Knowledge Updater → Context Loader. |
 | **R5** | **Semantic search hallucination** — LLM interprets retrieved episodes incorrectly, making decisions based on misremembered history | MEDIUM | HIGH | Always pass raw episode data alongside LLM summary. Implement confidence scoring on retrieved memories. Log which memories influenced each decision. |
 | **R6** | **Memory poisoning** — Bad trade outcomes create false patterns that mislead future decisions | MEDIUM | HIGH | Implement minimum sample size for pattern detection (N≥10). Confidence intervals on all learned patterns. Human review gate for strategy parameter changes. |
 | **R7** | **Cross-agent memory inconsistency** — Strategy Agent, Risk Agent, and Journal Agent each maintain separate memory views, leading to conflicting assessments | MEDIUM | MEDIUM | Implement shared memory store (PostgreSQL) with agent-specific views. Single source of truth for trade outcomes. |
 | **R8** | **Cold start problem** — New deployment has zero episodic memory, decisions are memory-blind for weeks | HIGH | MEDIUM | Backfill with historical trade data. Import backtest results as synthetic episodes. Start with conservative (memory-agnostic) parameters and gradually trust memory-informed decisions. |
-| **R9** | **Memory retrieval latency** — Semantic search adds 50-200ms to decision pipeline, potentially missing entry windows | LOW | MEDIUM | Pre-compute common queries. Cache frequently accessed episodes. Async memory retrieval (fetch while VMPM Steps 1-8 run). |
+| **R9** | **Memory retrieval latency** — Semantic search adds 50-200ms to decision pipeline, potentially missing entry windows | LOW | MEDIUM | Pre-compute common queries. Cache frequently accessed episodes. Async memory retrieval (fetch while AlphaStack Steps 1-8 run). |
 | **R10** | **Overfitting to history** — System becomes too conservative, avoiding trades that resemble past losses even when conditions have changed | MEDIUM | MEDIUM | Implement memory decay (older episodes weighted less). Include regime change detection. Set minimum novelty threshold. |
 | **R11** | **GDPR/compliance data retention** — Trade history contains PII (account IDs, broker credentials in logs). Indefinite retention may violate regulations | LOW | MEDIUM | Implement data anonymization in episodic memory. Separate PII from trade data. Configurable retention policies. |
 | **R12** | **Disaster recovery** — Memory loss (Redis crash, PostgreSQL corruption) means losing all learned knowledge | LOW | CRITICAL | Daily backups of PostgreSQL. Redis AOF persistence. Episodic memory exported to S3 weekly. Document recovery procedures. |
@@ -456,7 +456,7 @@ LOW PROB.      ┌────────────┐ ┌──────�
 - Implement Long-Term Memory (PostgreSQL + pgvector)
 - Add episode recording with embeddings
 - Basic semantic search (hybrid structured + vector)
-- Memory-augmented VMPM pipeline (Steps 9-14 reference history)
+- Memory-augmented AlphaStack pipeline (Steps 9-14 reference history)
 
 ### 7.4 Phase 3 Closed Learning Loop (Weeks 9-12)
 

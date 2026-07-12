@@ -32,7 +32,7 @@ Alpha Stack has completed an **extraordinarily thorough architecture phase**. Th
 | Component | Architecture Doc | Review Score | Fix Status | Ready? |
 |-----------|-----------------|--------------|------------|--------|
 | System Architecture (6-layer) | `architecture_system.md` | 7.2/10 | Fix: `fix_system_coherence.md` | ✅ |
-| Trading Engine (16-step VMPM) | `architecture_trading_engine.md` | 7.5/10 | Fix: `fix_confluence_scoring.md` | ✅ |
+| Trading Engine (16-step AlphaStack) | `architecture_trading_engine.md` | 7.5/10 | Fix: `fix_confluence_scoring.md` | ✅ |
 | Risk Management | `architecture_risk.md` | 8.5/10 | Fix: `fix_drawdown_deescalation.md` | ✅ |
 | Broker Routing | `architecture_broker_routing.md` | 7.0/10 | Fix: `fix_broker_disconnect.md`, `fix_mt5_integration.md` | ✅ |
 | Data Storage | `architecture_data_storage.md` | 9.0/10 | Fix: `fix_data_flow.md` | ✅ |
@@ -102,7 +102,7 @@ Every critical issue has a corresponding fix specification with implementation c
 | 9 | X25519 key derivation type confusion | `fix_security_encryption.md` | ✅ age passphrase mode |
 | 10 | MT5 pending order pricing bug | `fix_mt5_integration.md` | ✅ Order-type branching |
 | 11 | Broker disconnection 6 gaps | `fix_broker_disconnect.md` | ✅ Broker Health Manager |
-| 12 | VMPM pipeline no per-step error handling | `fix_error_handling.md` | ✅ StepErrorHandler system |
+| 12 | AlphaStack pipeline no per-step error handling | `fix_error_handling.md` | ✅ StepErrorHandler system |
 | 13 | LLM API failure handling undefined | `fix_error_handling.md` | ✅ LLMCallWrapper spec |
 | 14 | candle_1m / market_data divergence | `fix_data_flow.md` | ✅ Single source of truth |
 | 15 | Orchestrator single point of failure | `fix_orchestration.md` | ✅ Hot-standby + leader election |
@@ -143,7 +143,7 @@ The **minimum viable product** for Phase 1 is a **single-pair, single-broker, pa
 
 1. Connects to FXPesa Seychelles via MT5
 2. Streams EUR/USD tick data into TimescaleDB
-3. Runs the 16-step VMPM pipeline (with LLM calls pre-computed)
+3. Runs the 16-step AlphaStack pipeline (with LLM calls pre-computed)
 4. Executes trades on a demo account, then a $7 live account
 5. Delivers signals and trade notifications via Telegram
 6. Provides basic monitoring via Grafana dashboards
@@ -154,7 +154,7 @@ The **minimum viable product** for Phase 1 is a **single-pair, single-broker, pa
 
 | Component | Technology | Phase 1 Config |
 |-----------|-----------|----------------|
-| **Trading Engine** | Python 3.11+ (asyncio) | Single EUR/USD pair, VMPM 16-step |
+| **Trading Engine** | Python 3.11+ (asyncio) | Single EUR/USD pair, AlphaStack 16-step |
 | **MT5 Connection** | MetaTrader5 Python + ZMQ EA | FXPesa Seychelles, demo → $7 live |
 | **Database** | TimescaleDB + PostgreSQL + Redis | Docker, single instance |
 | **Event Bus** | Redis Streams + Pub/Sub | Single Redis, AOF persistence |
@@ -274,14 +274,14 @@ Day 5: Git + CI/CD + documentation
 ### 5.2 Week 2: Strategy Core (Days 6-10)
 
 ```
-Day 6-7: VMPM Steps 1-4 (Context Pipeline)
+Day 6-7: AlphaStack Steps 1-4 (Context Pipeline)
   ├── Step 1: Fundamental Intelligence (pre-computed, no LLM yet)
   ├── Step 2: Market Bias (regime detection: ADX + HMM)
   ├── Step 3: Session Analysis (Asian/London/NY parameters)
   ├── Step 4: Market Structure (swing point detection)
   └── StrategyContext dataclass with progressive enrichment
 
-Day 8-9: VMPM Steps 5-9 (Signal Pipeline)
+Day 8-9: AlphaStack Steps 5-9 (Signal Pipeline)
   ├── Step 5: Support & Resistance detection
   ├── Step 6: Liquidity detection (volume profile)
   ├── Step 7: SMC patterns (OB, FVG, BOS/CHoCH — with fixes)
@@ -289,7 +289,7 @@ Day 8-9: VMPM Steps 5-9 (Signal Pipeline)
   ├── Step 9: Candlestick pattern recognition
   └── Unified confluence scoring (fix_confluence_scoring.md)
 
-Day 10: VMPM Steps 10-12 (Execution Pipeline)
+Day 10: AlphaStack Steps 10-12 (Execution Pipeline)
   ├── Step 10: Entry logic (confluence → trade proposal)
   ├── Step 11: Position sizing (Kelly + 4-factor model)
   ├── Step 12: Risk gate (hard limits enforcement)
@@ -312,7 +312,7 @@ Day 13: Broker Integration
   ├── Position reconciliation
   └── Broker Health Manager (adaptive timeout, failover)
 
-Day 14: VMPM Steps 13-16 (Management + Learning)
+Day 14: AlphaStack Steps 13-16 (Management + Learning)
   ├── Step 13: Take profit logic
   ├── Step 14: Trade management (trailing stops, partial closes)
   ├── Step 15: Exit conditions
@@ -358,9 +358,9 @@ Week 1                Week 2                Week 3                Week 4
 ──────                ──────                ──────                ──────
 Docker Compose ──┐
                  ├──→ MT5 Connection ──┐
-Data Pipeline ───┘                     ├──→ VMPM Steps 1-9 ──┐
+Data Pipeline ───┘                     ├──→ AlphaStack Steps 1-9 ──┐
                                        │                      │
-Event Bus ─────────────────────────────┤                      ├──→ VMPM Steps 10-16
+Event Bus ─────────────────────────────┤                      ├──→ AlphaStack Steps 10-16
                                        │                      │
 Backtesting ───────────────────────────┘                      │
                                                               │

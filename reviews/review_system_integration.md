@@ -33,7 +33,7 @@ Data Pipeline (Ingestion Layer)
     ├─→ Redis hot cache (tick:{symbol}, ohlcv:{symbol}:{tf})
     │
     ▼
-VMPM Strategy Pipeline (16 Steps)
+AlphaStack Strategy Pipeline (16 Steps)
     │ S1 (Fundamental) → S2 (Bias) → S3 (Session) → S4 (Structure)
     │ → S5 (S/R) → S6 (Liquidity) → S7 (SMC) → S8 (RSI)
     │ → S9 (Candlestick) → S10 (Confluence Engine)
@@ -264,7 +264,7 @@ Stream naming differs between documents:
 | Single-machine deployment | ✅ | Docker Compose on local machine |
 | MT5 connectivity | ✅ | MT5 Python API + ZeroMQ bridge |
 | Basic data pipeline | ✅ | Tick → 1m → higher TF via continuous aggregates |
-| Strategy execution | ✅ | VMPM 16-step pipeline |
+| Strategy execution | ✅ | AlphaStack 16-step pipeline |
 | Risk management | ✅ | Risk Governor with hard limits |
 | Trade journaling | ✅ | PostgreSQL + journal entries |
 | Monitoring | ✅ | Prometheus + Grafana + Telegram alerts |
@@ -338,7 +338,7 @@ The critical path (market data → execution) has a budget of ~125-425ms for for
 | Step | Budget | Risk |
 |---|---|---|
 | Tick ingestion | 5ms | Low |
-| VMPM Pipeline (16 steps) | 50-200ms | **HIGH** — LLM steps (S1, S2) could exceed budget |
+| AlphaStack Pipeline (16 steps) | 50-200ms | **HIGH** — LLM steps (S1, S2) could exceed budget |
 | Risk Governor | 10ms | Low |
 | Execution Agent | 5ms | Low |
 | Order Manager | 10ms | Low |
@@ -409,7 +409,7 @@ The broker routing architecture defines failover for crypto (multiple exchanges)
 
 | Concept | System Arch | Trading Engine | Broker Routing | Data Storage | Consistent? |
 |---|---|---|---|---|---|
-| VMPM 16 steps | ✅ High-level | ✅ Detailed | — | — | ✅ |
+| AlphaStack 16 steps | ✅ High-level | ✅ Detailed | — | — | ✅ |
 | StrategyContext dataclass | ✅ | ✅ (as TradeOrder) | — | — | ⚠️ Different names |
 | Event bus (Redis Streams) | ✅ | ✅ | ✅ | ✅ | ✅ (minor naming diffs) |
 | BrokerConnector ABC | ✅ 10 methods | ✅ 10 methods | ✅ 14 methods | — | ⚠️ Interface mismatch |
@@ -482,7 +482,7 @@ The broker routing architecture defines failover for crypto (multiple exchanges)
 ### Key Strengths
 
 1. **Event-first architecture** enables clean decoupling and replay capability
-2. **VMPM 16-step pipeline** is well-designed with clear interfaces and progressive enrichment
+2. **AlphaStack 16-step pipeline** is well-designed with clear interfaces and progressive enrichment
 3. **Risk Governor** is properly positioned as an unskippable gate with hard limits
 4. **Tiered scaling** from $7 to institutional is thoughtfully designed without requiring rewrites
 5. **Data storage** is comprehensive with proper retention, compression, and backup strategies

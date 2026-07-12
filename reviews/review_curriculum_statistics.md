@@ -57,7 +57,7 @@ I cross-referenced every concept-to-module mapping against the system architectu
 | Copulas → `risk/copulas.py` → Risk Manager | Risk doc: correlation monitoring, tail dependence | ✅ Confirmed |
 | VaR/CVaR → `risk/var_calculator.py` | Risk doc: CVaR framework (Section 6) is a core component | ✅ Confirmed |
 | Monte Carlo → `compute/monte_carlo.py` | Risk doc: stress testing, scenario analysis | ✅ Confirmed |
-| Bayesian updating → `signal/bayesian_updater.py` | System doc: VMPM pipeline enriches context progressively | ✅ Confirmed |
+| Bayesian updating → `signal/bayesian_updater.py` | System doc: AlphaStack pipeline enriches context progressively | ✅ Confirmed |
 | Control charts → `monitoring/control_charts.py` | System doc: monitoring layer with Prometheus + Grafana | ✅ Confirmed |
 | Hypothesis testing → `backtest/hypothesis_test.py` | System doc: backtesting engine, strategy validation | ✅ Confirmed |
 | PCA → `factor/pca.py` → Factor Agent | System doc: ML models include regime classifier | ✅ Confirmed |
@@ -81,7 +81,7 @@ The Agent-Skill Matrix (Section 4 of curriculum doc) lists 15 agents with their 
 | Curriculum Agent | System Architecture Agent | Match? |
 |-----------------|--------------------------|--------|
 | Fundamental Agent | News Agent (sentiment + macro) | ✅ Conceptual match |
-| Time Series Agent | Strategy Agent (VMPM pipeline) | ✅ Subsumed into strategy |
+| Time Series Agent | Strategy Agent (AlphaStack pipeline) | ✅ Subsumed into strategy |
 | Volatility Agent | Risk Agent | ✅ Direct match |
 | Regime Agent | Strategy Agent (ML regime classifier) | ✅ Confirmed in system doc |
 | Pairs Agent | Strategy Agent (pairs trading) | ✅ Subsumed into strategy |
@@ -171,7 +171,7 @@ The curriculum document provides:
 
 | Curriculum Code Path | System Architecture Module | Exists? |
 |---------------------|---------------------------|---------|
-| `signal/bayesian_updater.py` | `core/agents/strategy_agent.py` (VMPM pipeline) | ✅ Conceptual match |
+| `signal/bayesian_updater.py` | `core/agents/strategy_agent.py` (AlphaStack pipeline) | ✅ Conceptual match |
 | `risk/return_distribution.py` | `core/agents/risk_agent.py` | ✅ Conceptual match |
 | `backtest/hypothesis_test.py` | `tests/backtest/` | ✅ Directory exists |
 | `monitoring/control_charts.py` | `infra/monitoring/` | ✅ Directory exists |
@@ -221,11 +221,11 @@ The curriculum document provides:
 
 ### 🟡 SIGNIFICANT GAPS (5)
 
-#### Gap 4: VMPM 16-Step Pipeline ↔ Statistics Curriculum Integration Unclear
+#### Gap 4: AlphaStack 16-Step Pipeline ↔ Statistics Curriculum Integration Unclear
 
-The system architecture defines a 16-step VMPM pipeline (Steps 1-16: Fundamental Intel → Journal & Learn). The statistics curriculum maps concepts to engine subsystems (Distribution, Estimation, Hypothesis Testing, Time Series, Multivariate, Quality Control, Compute). **The mapping between VMPM steps and statistics modules is implicit, not explicit.**
+The system architecture defines a 16-step AlphaStack pipeline (Steps 1-16: Fundamental Intel → Journal & Learn). The statistics curriculum maps concepts to engine subsystems (Distribution, Estimation, Hypothesis Testing, Time Series, Multivariate, Quality Control, Compute). **The mapping between AlphaStack steps and statistics modules is implicit, not explicit.**
 
-| VMPM Step | Statistics Module | Explicit? |
+| AlphaStack Step | Statistics Module | Explicit? |
 |-----------|------------------|-----------|
 | Step 1: Fundamental Intel | STA 245 (macro stats), STA 246 (demographics) | ❌ Not mapped |
 | Step 2: Market Bias | STA 442 (regime classification), STA 244 (trend analysis) | ❌ Not mapped |
@@ -234,7 +234,7 @@ The system architecture defines a 16-step VMPM pipeline (Steps 1-16: Fundamental
 | Step 11: Position Sizing | STA 142 (Kelly), STA 341 (MLE) | ❌ Not mapped |
 | Step 16: Journal & Learn | STA 342 (hypothesis testing), STA 346 (control charts) | ❌ Not mapped |
 
-**Recommendation:** Add a "VMPM Step ↔ STA Unit" cross-reference table to the curriculum document.
+**Recommendation:** Add a "AlphaStack Step ↔ STA Unit" cross-reference table to the curriculum document.
 
 #### Gap 5: Online Learning / Real-Time Updating Not Addressed
 
@@ -312,7 +312,7 @@ STA 442 (Multivariate Analysis), STA 443 (Measure Theory), STA 444 (Non-Parametr
 | **Time series application** (proper use) | 8/10 | All concepts correctly applied; GARCH ownership unclear |
 | **Code driving** (curriculum → code) | 7/10 | 75% of code components have architectural homes; 25% need adding |
 | **Gap awareness** (identified weak points) | 8/10 | STA 244 and STA 342 correctly flagged as critical; 3 unknown grades |
-| **Internal consistency** | 7/10 | Some dual-mappings, Pricing Agent gap, VMPM integration unclear |
+| **Internal consistency** | 7/10 | Some dual-mappings, Pricing Agent gap, AlphaStack integration unclear |
 | **Overall** | **7.5/10** | Strong blueprint, needs tightening before implementation |
 
 ---
@@ -322,7 +322,7 @@ STA 442 (Multivariate Analysis), STA 443 (Measure Theory), STA 444 (Non-Parametr
 | # | Action | Priority | Effort |
 |---|--------|----------|--------|
 | 1 | Resolve GARCH file location: pick `risk/garch.py` (recommended) and update dependency graph | 🔴 High | 30 min |
-| 2 | Add VMPM Step ↔ STA Unit cross-reference table | 🔴 High | 2 hours |
+| 2 | Add AlphaStack Step ↔ STA Unit cross-reference table | 🔴 High | 2 hours |
 | 3 | Create STA 244 remediation syllabus (textbooks, courses, projects) | 🔴 High | 3 hours |
 | 4 | Create STA 342 remediation cheat sheet with trading examples | 🔴 High | 3 hours |
 | 5 | Add Pricing Agent to system architecture OR scope out options | 🟡 Medium | 1 hour |
@@ -344,7 +344,7 @@ The critical weaknesses are:
 
 1. **Knowledge gaps in the two most important units** (STA 244 at D, STA 342 at D) — these need urgent remediation before implementation
 2. **Missing architectural home for pricing models** — needs resolution before any derivatives trading
-3. **Implicit rather than explicit VMPM integration** — the 16-step pipeline needs a clear statistics dependency map
+3. **Implicit rather than explicit AlphaStack integration** — the 16-step pipeline needs a clear statistics dependency map
 
 With the 12 recommended actions completed, this document becomes a **production-ready engineering specification**. The curriculum-to-code wiring is 90% complete — the remaining 10% is reconciliation and gap-filling.
 

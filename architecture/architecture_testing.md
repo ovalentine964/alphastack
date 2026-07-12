@@ -73,7 +73,7 @@
 | **Unit Tests** | Individual functions/methods | ≥90% line, ≥80% branch | <60s | Every commit |
 | **Integration Tests** | Module interactions, DB, Redis | ≥80% critical paths | <5min | Every PR |
 | **E2E Tests** | Full trade lifecycle | 100% happy paths, 100% risk gates | <15min | Nightly + pre-release |
-| **Backtest Validation** | Strategy correctness | 100% VMPM steps validated | <30min | Weekly + pre-deploy |
+| **Backtest Validation** | Strategy correctness | 100% AlphaStack steps validated | <30min | Weekly + pre-deploy |
 | **Performance Tests** | Latency, throughput, load | All critical paths benchmarked | <30min | Weekly |
 | **Security Tests** | Vulnerability, penetration | Zero critical/high CVEs | <20min | Every commit (auto) + quarterly (manual) |
 | **Cross-Platform** | All supported platforms | 100% platform-specific code | <30min | Nightly |
@@ -83,7 +83,7 @@
 
 | Module | Unit Coverage | Integration Coverage | Critical Test Areas |
 |--------|--------------|---------------------|---------------------|
-| VMPM Steps 1-16 | ≥95% | ≥85% | Signal generation, confluence scoring, step chaining |
+| AlphaStack Steps 1-16 | ≥95% | ≥85% | Signal generation, confluence scoring, step chaining |
 | Risk Governor | 100% | 100% | All 6 hard limits, circuit breakers, correlation caps |
 | Broker Connectors | ≥90% | 100% | Order placement, modification, cancellation, error handling |
 | Data Pipeline | ≥85% | ≥80% | Gap detection, outlier filtering, cross-source validation |
@@ -111,7 +111,7 @@
 tests/
 ├── unit/
 │   ├── core/
-│   │   ├── vmpm/
+│   │   ├── alphastack/
 │   │   │   ├── test_step01_fundamental.py
 │   │   │   ├── test_step02_bias.py
 │   │   │   ├── ...
@@ -159,14 +159,14 @@ tests/
 
 ### 3.3 Unit Test Patterns
 
-#### VMPM Step Testing (Parameterized)
+#### AlphaStack Step Testing (Parameterized)
 
 ```python
-# tests/unit/core/vmpm/test_step10_confluence.py
+# tests/unit/core/alphastack/test_step10_confluence.py
 
 import pytest
-from alpha.core.vmpm.steps.step10_confluence import ConfluenceEngine
-from alpha.core.vmpm.context import StrategyContext
+from alpha.core.alphastack.steps.step10_confluence import ConfluenceEngine
+from alpha.core.alphastack.context import StrategyContext
 from tests.fixtures.builders import (
     build_signal_event,
     build_strategy_context,
@@ -613,7 +613,7 @@ describe('Portfolio Component', () => {
 |----------|--------------|----------------|-----------------|
 | **Event Bus** | Redis Streams pub/sub, consumer groups, ordering | Testcontainers Redis | <10s |
 | **Data Pipeline** | Ingestion → storage → retrieval chain | Testcontainers TimescaleDB | <20s |
-| **VMPM Pipeline** | Steps 1-16 chained execution | Mock broker + Redis | <30s |
+| **AlphaStack Pipeline** | Steps 1-16 chained execution | Mock broker + Redis | <30s |
 | **Risk → Execution** | Risk gate → order placement → fill tracking | Mock broker | <15s |
 | **Agent Communication** | Inter-agent message routing | Redis Streams | <20s |
 | **API Gateway** | Auth → rate limit → route → response | Testcontainers Redis + PG | <15s |
@@ -777,23 +777,23 @@ class TestEventBusIntegration:
         assert dlq_length == 1
 ```
 
-### 4.4 VMPM Pipeline Integration Tests
+### 4.4 AlphaStack Pipeline Integration Tests
 
 ```python
-# tests/integration/test_vmpm_pipeline.py
+# tests/integration/test_alphastack_pipeline.py
 
 import pytest
-from alpha.core.vmpm.pipeline import VMPMPipeline
-from alpha.core.vmpm.context import StrategyContext
+from alpha.core.alphastack.pipeline import AlphaStackPipeline
+from alpha.core.alphastack.context import StrategyContext
 from tests.fixtures.builders import build_market_event
 
-class TestVMPMPipelineIntegration:
-    """Integration tests for the full 16-step VMPM pipeline."""
+class TestAlphaStackPipelineIntegration:
+    """Integration tests for the full 16-step AlphaStack pipeline."""
 
     @pytest.fixture
     async def pipeline(self, event_bus, redis_client):
         """Initialize pipeline with real Redis but mock broker."""
-        pipeline = VMPMPipeline(event_bus=event_bus, config={
+        pipeline = AlphaStackPipeline(event_bus=event_bus, config={
             'instruments': ['EURUSD'],
             'timeframes': ['H1', 'H4', 'D1'],
             'min_confidence': 0.65,
@@ -1056,7 +1056,7 @@ class TestTradeLifecycleE2E:
         """
         SCENARIO 1: Complete winning trade from signal to journal.
         
-        Replay a historical EUR/USD sequence where VMPM produces
+        Replay a historical EUR/USD sequence where AlphaStack produces
         an A+ bullish signal during London session, price reaches TP2.
         """
         # Load fixture: 500 bars of EUR/USD H1 ending with a textbook setup
@@ -1266,7 +1266,7 @@ The backtesting engine must produce results identical to what live trading would
 # tests/backtest/test_module_equivalence.py
 
 import pytest
-from alpha.core.vmpm.pipeline import VMPMPipeline
+from alpha.core.alphastack.pipeline import AlphaStackPipeline
 from alpha.backtest.engine import BacktestEngine
 from alpha.backtest.replay_bus import ReplayEventBus
 
@@ -1277,9 +1277,9 @@ class TestModuleEquivalence:
     """
 
     async def test_step_outputs_match_live(self, sample_ohlcv_data):
-        """Each VMPM step produces identical output in backtest vs live mode."""
-        live_pipeline = VMPMPipeline(mode='live')
-        backtest_pipeline = VMPMPipeline(mode='backtest')
+        """Each AlphaStack step produces identical output in backtest vs live mode."""
+        live_pipeline = AlphaStackPipeline(mode='live')
+        backtest_pipeline = AlphaStackPipeline(mode='backtest')
 
         for i in range(len(sample_ohlcv_data)):
             event = build_market_event_from_row(sample_ohlcv_data.iloc[i])
@@ -1394,7 +1394,7 @@ class TestWalkForwardOptimization:
         optimizer = WalkForwardOptimizer(engine=backtest_engine, n_splits=5)
         result = await optimizer.optimize(
             data=load_historical_data("EURUSD", "2020-01-01", "2025-12-31"),
-            params=VMPM_DEFAULT_PARAMS,
+            params=AlphaStack_DEFAULT_PARAMS,
         )
 
         # OOS should not be dramatically worse than IS
@@ -1433,12 +1433,12 @@ class TestWalkForwardOptimization:
 # tests/backtest/test_strategy_correctness.py
 
 class TestStrategyCorrectness:
-    """Verify VMPM strategy behaves correctly on known scenarios."""
+    """Verify AlphaStack strategy behaves correctly on known scenarios."""
 
     def test_bullish_ob_with_engulfing_produces_buy_signal(self):
         """Classic SMC setup: H4 Order Block + Bullish Engulfing during London → BUY."""
         scenario = load_fixture("smc_bullish_ob_engulfing_london.json")
-        result = run_vmpm(scenario)
+        result = run_alphastack(scenario)
 
         assert result.direction == "BULLISH"
         assert result.confluence_score >= 0.70
@@ -1448,7 +1448,7 @@ class TestStrategyCorrectness:
     def test_bearish_choch_with_fvg_produces_sell_signal(self):
         """CHoCH + Bearish FVG on H4 during NY → SELL."""
         scenario = load_fixture("smc_bearish_choch_fvg_ny.json")
-        result = run_vmpm(scenario)
+        result = run_alphastack(scenario)
 
         assert result.direction == "BEARISH"
         assert result.confluence_score >= 0.65
@@ -1456,14 +1456,14 @@ class TestStrategyCorrectness:
     def test_no_signal_during_asian_range_chop(self):
         """Choppy Asian session with no clear structure → NO TRADE."""
         scenario = load_fixture("asian_chop_no_structure.json")
-        result = run_vmpm(scenario)
+        result = run_alphastack(scenario)
 
         assert result.trade_proposal is None
 
     def test_no_signal_when_fundamentals_avoid(self):
         """NFP day with AVOID_ALL → no signal regardless of technical setup."""
         scenario = load_fixture("nfp_day_avoid_all.json")
-        result = run_vmpm(scenario)
+        result = run_alphastack(scenario)
 
         assert result.trade_proposal is None
         assert result.halt_reason contains "AVOID_ALL"
@@ -1472,8 +1472,8 @@ class TestStrategyCorrectness:
         """Larger account → larger position (proportional to risk %)."""
         scenario = load_fixture("standard_a_plus_setup.json")
 
-        result_1k = run_vmpm_with_balance(scenario, balance=1000)
-        result_10k = run_vmpm_with_balance(scenario, balance=10000)
+        result_1k = run_alphastack_with_balance(scenario, balance=1000)
+        result_10k = run_alphastack_with_balance(scenario, balance=10000)
 
         assert result_10k.position_size > result_1k.position_size
         # Risk % should be the same
@@ -1484,7 +1484,7 @@ class TestStrategyCorrectness:
     def test_stop_loss_beyond_ob_structure(self):
         """Stop loss should be placed beyond Order Block, not at exact swing low."""
         scenario = load_fixture("ob_with_liquidity_below.json")
-        result = run_vmpm(scenario)
+        result = run_alphastack(scenario)
 
         # SL should be below OB edge + buffer, not at the obvious swing low
         assert result.stop_loss < scenario.ob_edge
@@ -1500,7 +1500,7 @@ class TestStrategyCorrectness:
 | Metric | Target | Measurement Method |
 |--------|--------|--------------------|
 | **Signal-to-Execution Latency** | <500ms (P95) | End-to-end timer |
-| **VMPM Pipeline Processing** | <200ms (P95) | Per-candle processing time |
+| **AlphaStack Pipeline Processing** | <200ms (P95) | Per-candle processing time |
 | **Risk Governor Check** | <10ms (P99) | Single check latency |
 | **Order Placement (MT5)** | <200ms (P95) | Broker round-trip |
 | **Order Placement (CCXT)** | <500ms (P95) | Exchange round-trip |
@@ -1522,8 +1522,8 @@ import statistics
 
 class TestLatencyBenchmarks:
 
-    async def test_vmpm_pipeline_latency(self, pipeline, sample_ohlcv_data):
-        """VMPM pipeline processes a single candle in <200ms."""
+    async def test_alphastack_pipeline_latency(self, pipeline, sample_ohlcv_data):
+        """AlphaStack pipeline processes a single candle in <200ms."""
         latencies = []
 
         for i in range(100):

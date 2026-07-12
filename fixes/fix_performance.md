@@ -20,7 +20,7 @@
 
 ### Problem
 
-LLM API calls (DeepSeek, Qwen) in VMPM Steps 1–2 add **200–2000ms** of non-deterministic latency directly on the tick-to-order critical path. API timeouts can blow the 5s target entirely.
+LLM API calls (DeepSeek, Qwen) in AlphaStack Steps 1–2 add **200–2000ms** of non-deterministic latency directly on the tick-to-order critical path. API timeouts can blow the 5s target entirely.
 
 ### Architecture Change
 
@@ -270,7 +270,7 @@ class PrecomputeScheduler:
 #### 1.1.4 Cache Reader (Hot Path)
 
 ```python
-# alpha/vmpm/cache_reader.py
+# alpha/alphastack/cache_reader.py
 
 import json
 import time
@@ -278,7 +278,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-logger = logging.getLogger("vmpm.cache")
+logger = logging.getLogger("alphastack.cache")
 
 @dataclass
 class CachedValue:
@@ -454,7 +454,7 @@ pipeline:
 #### 1.2.1 Budget Enforcement (Circuit Breaker)
 
 ```python
-# alpha/vmpm/budget_enforcer.py
+# alpha/alphastack/budget_enforcer.py
 
 import asyncio
 import time
@@ -462,7 +462,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-logger = logging.getLogger("vmpm.budget")
+logger = logging.getLogger("alphastack.budget")
 
 @dataclass
 class StepResult:
@@ -560,7 +560,7 @@ class PipelineBudgetEnforcer:
 When pre-computed values are missing or stale:
 
 ```python
-# alpha/vmpm/fallback.py
+# alpha/alphastack/fallback.py
 
 async def get_fundamental_context(
     cache: PrecomputeCacheReader,
@@ -638,14 +638,14 @@ CACHE_HIT = Counter(
 )
 
 PIPELINE_LATENCY = Histogram(
-    "vmpm_pipeline_latency_seconds",
-    "End-to-end VMPM pipeline latency",
+    "alphastack_pipeline_latency_seconds",
+    "End-to-end AlphaStack pipeline latency",
     ["pair"],
     buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
 )
 
 PIPELINE_BUDGET_EXCEEDED = Counter(
-    "vmpm_pipeline_budget_exceeded_total",
+    "alphastack_pipeline_budget_exceeded_total",
     "Pipeline steps that exceeded latency budget",
     ["pair", "step"],
 )
@@ -655,8 +655,8 @@ PIPELINE_BUDGET_EXCEEDED = Counter(
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| VMPM pipeline p50 (no LLM) | ≤150ms | Prometheus histogram |
-| VMPM pipeline p99 (no LLM) | ≤300ms | Prometheus histogram |
+| AlphaStack pipeline p50 (no LLM) | ≤150ms | Prometheus histogram |
+| AlphaStack pipeline p99 (no LLM) | ≤300ms | Prometheus histogram |
 | Pre-compute cache hit rate | ≥95% | Counter ratio |
 | Stale cache usage rate | <5% | Counter ratio |
 | LLM circuit breaker activations | <1/day | Counter |
@@ -2069,7 +2069,7 @@ WS_MESSAGE_LATENCY = Histogram(
 ### 4.1 Integration Checklist
 
 - [ ] Pre-compute workers running and producing cache entries
-- [ ] VMPM pipeline reads from cache, not LLM directly
+- [ ] AlphaStack pipeline reads from cache, not LLM directly
 - [ ] Pipeline budget enforcer aborts on timeout
 - [ ] Memory guard starts with each agent process
 - [ ] Object pools initialized at startup

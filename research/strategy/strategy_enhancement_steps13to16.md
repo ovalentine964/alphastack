@@ -1,4 +1,4 @@
-# VMPM Strategy Enhancement — Steps 13–16
+# AlphaStack Strategy Enhancement — Steps 13–16
 ## Alpha Stack: Take Profit, Trade Management, Exit Conditions & Journal Learning
 
 ---
@@ -1160,7 +1160,7 @@ END OF QUARTER:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    VMPM STRATEGY FLOW                           │
+│                    AlphaStack STRATEGY FLOW                           │
 │                                                                 │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐ │
 │  │ STEP 12  │───→│ STEP 13  │───→│ STEP 14  │───→│ STEP 15  │ │
@@ -1225,5 +1225,5 @@ All agents communicate via structured messages:
 
 ---
 
-*Document generated for Alpha Stack VMPM Strategy Enhancement — Steps 13-16*
+*Document generated for Alpha Stack AlphaStack Strategy Enhancement — Steps 13-16*
 *All enhancements are designed for implementation within the multi-agent loop architecture*

@@ -113,7 +113,7 @@ Valentine's CS/IT curriculum mapping to Alpha Stack is **architecturally sound**
 | LLM | `AlphaLLM` | Tier 4 (1-5s) | ✅ Correct |
 | GAN | `AlphaSynth` | N/A (offline) | ✅ Correct |
 
-**Issue #6 (Critical):** The curriculum doc lists **8 model families** and **20-35 total active models**, but the model-to-VMPM-step mapping in `architecture_ai_models.md` shows that **Steps 3 (Session Analysis) and 5 (S/R Detection) are primarily rules-based/algorithmic** with only optional ML augmentation. This means the VMPM pipeline is NOT fully ML-driven — it's a hybrid of algorithmic + ML. The curriculum doc's framing of "ML/AI is the brain" is slightly misleading. **Recommendation:** Add a clear statement that the VMPM pipeline is **hybrid algorithmic+ML**, not pure ML. Approximately 60% of steps are algorithmic with ML scoring/confirmation.
+**Issue #6 (Critical):** The curriculum doc lists **8 model families** and **20-35 total active models**, but the model-to-AlphaStack-step mapping in `architecture_ai_models.md` shows that **Steps 3 (Session Analysis) and 5 (S/R Detection) are primarily rules-based/algorithmic** with only optional ML augmentation. This means the AlphaStack pipeline is NOT fully ML-driven — it's a hybrid of algorithmic + ML. The curriculum doc's framing of "ML/AI is the brain" is slightly misleading. **Recommendation:** Add a clear statement that the AlphaStack pipeline is **hybrid algorithmic+ML**, not pure ML. Approximately 60% of steps are algorithmic with ML scoring/confirmation.
 
 **Issue #7 (Moderate):** The curriculum doc maps `K-Means` to regime detection, but `architecture_ai_models.md` specifies **HMM** as the primary regime detector with K-Means as one input to an ensemble. The curriculum doc should be updated to reflect the ensemble approach (HMM + Rules + Volatility Filter + XGBoost). **Recommendation:** Update Section 3.2 to reference the ensemble regime detector, not just K-Means.
 
@@ -309,13 +309,13 @@ The curriculum doc provides a **concept → module** mapping, which is excellent
 
 **Recommendation:** Expand the wiring checklist into a proper implementation plan with module names, test criteria, dependencies, and effort estimates.
 
-### 5.2 VMPM Pipeline Step Coverage
+### 5.2 AlphaStack Pipeline Step Coverage
 
 **Verdict: ✅ COMPLETE**
 
-All 16 VMPM steps have CS/IT coverage:
+All 16 AlphaStack steps have CS/IT coverage:
 
-| VMPM Step | CS/IT Coverage | Source |
+| AlphaStack Step | CS/IT Coverage | Source |
 |-----------|---------------|--------|
 | Step 1: Fundamental Intelligence | FinBERT + LLM (ML/AI) | ✅ Covered |
 | Step 2: Market Bias | HMM + XGBoost (ML/AI) | ✅ Covered |
@@ -380,7 +380,7 @@ Every agent in the multi-agent system has CS course assignments:
 | MT5 bridge | ZeroMQ | ZeroMQ | ✅ |
 | Latency target (tick→order) | 25ms | 125-425ms | ❌ **CONFLICT** |
 
-**Issue #14 (Critical):** The curriculum doc claims **25ms** tick-to-order latency, but the system architecture claims **125-425ms** (forex) and **200-600ms** (crypto). This is a **5-24× discrepancy**. The system architecture's number includes LLM inference time (50-200ms for strategy steps), while the curriculum doc's 25ms appears to be for the non-LLM fast path only. **Recommendation:** Reconcile these numbers. The 25ms target is realistic for the algorithmic fast path (Tier 1 models), but the full VMPM pipeline with LLM steps will take 125-600ms. Both numbers should be stated with clear context.
+**Issue #14 (Critical):** The curriculum doc claims **25ms** tick-to-order latency, but the system architecture claims **125-425ms** (forex) and **200-600ms** (crypto). This is a **5-24× discrepancy**. The system architecture's number includes LLM inference time (50-200ms for strategy steps), while the curriculum doc's 25ms appears to be for the non-LLM fast path only. **Recommendation:** Reconcile these numbers. The 25ms target is realistic for the algorithmic fast path (Tier 1 models), but the full AlphaStack pipeline with LLM steps will take 125-600ms. Both numbers should be stated with clear context.
 
 ### 6.2 Curriculum CS ↔ AI Models Architecture
 
@@ -465,7 +465,7 @@ The math architecture's agent assignment matrix aligns with the CS architecture'
 | 3 | Minor | §1.2 | Bellman-Ford execution frequency unspecified | Open |
 | 4 | Moderate | §1.3 | LangGraph vs Redis Pub/Sub role ambiguity | Open |
 | 5 | Minor | §1.3 | No ClickHouse migration path | Open |
-| 6 | Critical | §1.4 | VMPM pipeline hybrid nature not clearly stated | Open |
+| 6 | Critical | §1.4 | AlphaStack pipeline hybrid nature not clearly stated | Open |
 | 7 | Moderate | §1.4 | K-Means vs HMM ensemble inconsistency | Open |
 | 8 | Minor | §2.1 | No XGBoost vs LightGBM selection criteria | Open |
 | 9 | Minor | §2.3 | GAN variant unspecified | Open |

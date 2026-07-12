@@ -1,4 +1,4 @@
-# VMPM Strategy Enhancement — Steps 1–4
+# AlphaStack Strategy Enhancement — Steps 1–4
 ## Alpha Stack: Institutional-Grade AI Trading System
 ### Research-Backed Enhancements for the Valentine Money Printing Machine
 
@@ -1622,7 +1622,7 @@ STEP 5+ (Entry Engine): Uses all above to execute trades
 ```python
 class AlphaStackOrchestrator:
     """
-    Orchestrates all agents in the VMPM pipeline.
+    Orchestrates all agents in the AlphaStack pipeline.
     """
     
     def run_pipeline(self, symbol):

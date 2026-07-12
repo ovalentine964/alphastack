@@ -1,6 +1,6 @@
 # Alpha Stack — Trading Engine Architecture
 
-## The Alpha Strategy: 16-Step Enhanced VMPM Trading System
+## The Alpha Strategy: 16-Step Enhanced AlphaStack Trading System
 
 **Version:** 1.0 | **Date:** 2026-07-11 | **Author:** Trading Engine Architect
 

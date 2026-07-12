@@ -32,7 +32,7 @@ The Alpha Stack data architecture is **impressively comprehensive** for a system
 SOURCES          INGESTION       PROCESSING       DECISION        EXECUTION        FEEDBACK
 ─────────        ──────────      ──────────       ──────────      ──────────       ──────────
 MT5 ticks   ──→  Tick Collector ──→ TimescaleDB ──→ S1-S9 Agents ──→ S10 Confluence ──→ S11-S13
-CCXT feeds  ──→  WS Collector  ──→ Redis cache  ──→ VMPM Pipeline ──→ Risk Governor ──→ Broker
+CCXT feeds  ──→  WS Collector  ──→ Redis cache  ──→ AlphaStack Pipeline ──→ Risk Governor ──→ Broker
 News APIs   ──→  News Aggregator──→ FinBERT     ──→ News Agent   ──→ Execution Agent──→ Fill
 Econ Cal    ──→  Calendar Fetch ──→ PostgreSQL  ──→ S1 Fundamental──→ Order Manager ──→ S14-S16
 On-chain    ──→  Chain Monitor ──→ TimescaleDB  ──→ S6 Liquidity ──→ TMS Monitor   ──→ Journal
@@ -72,7 +72,7 @@ Option (C) is cleanest: one source of truth (`market_data`) for all timeframes.
 | # | Bottleneck | Impact | Severity | Mitigation in Architecture |
 |---|-----------|--------|----------|---------------------------|
 | B2.1 | **Single Redis instance for all Pub/Sub + Streams + Cache** | At 100 ticks/sec across 28 pairs, Redis becomes the single contention point. Pub/Sub is single-threaded. | 🔴 High | Scaling path exists (Redis Cluster at Phase 4) but no intermediate sharding strategy. |
-| B2.2 | **LLM inference in critical path (S1, S2, S7, S10)** | Steps requiring LLM reasoning (DeepSeek/Qwen) add 200-2000ms per call. With 4+ LLM calls in the signal chain, total latency can exceed 5 seconds. | 🔴 High | No async/pipeline optimization documented. Architecture says "50-200ms" for VMPM pipeline but LLM calls alone could be 10× that. |
+| B2.2 | **LLM inference in critical path (S1, S2, S7, S10)** | Steps requiring LLM reasoning (DeepSeek/Qwen) add 200-2000ms per call. With 4+ LLM calls in the signal chain, total latency can exceed 5 seconds. | 🔴 High | No async/pipeline optimization documented. Architecture says "50-200ms" for AlphaStack pipeline but LLM calls alone could be 10× that. |
 | B2.3 | **TimescaleDB write amplification** | Every tick writes to `ticks` hypertable, then triggers continuous aggregate refresh for `candle_1m`. At 100 ticks/sec, that's 100 writes/sec + aggregate refresh overhead. | 🟡 Medium | Chunk interval (1 day) and compression (after 7 days) are appropriate. Batch writes could help. |
 | B2.4 | **PostgreSQL SERIALIZABLE isolation on orders** | SERIALIZABLE isolation on `orders` table will cause serialization failures under concurrent agent writes. | 🟡 Medium | Architecture specifies SERIALIZABLE for ACID on money. This is correct for safety but will cause retries under load. |
 | B2.5 | **MongoDB adds operational overhead with no clear Phase 1 value** | Architecture notes MongoDB is optional at Phase 1 (JSON files suffice) but includes it in the tech stack. Adds a third database to manage. | 🟢 Low | Correctly phase-gated. Not a bottleneck if deferred. |
@@ -98,7 +98,7 @@ TOTAL (no LLM)               ~775ms      215-860ms
 TOTAL (with LLM)             ~1775ms     1215-4860ms  ← PROBLEM
 ```
 
-**Critical Issue:** The "50-200ms" claim for the VMPM pipeline assumes all steps are in-process calculations. If S1, S2, or S10 use LLM inference, the actual latency is **5-25× higher than claimed**.
+**Critical Issue:** The "50-200ms" claim for the AlphaStack pipeline assumes all steps are in-process calculations. If S1, S2, or S10 use LLM inference, the actual latency is **5-25× higher than claimed**.
 
 **Recommendation:**
 1. Document which steps use LLM vs. pure computation
