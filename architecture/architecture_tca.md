@@ -1,5 +1,11 @@
 # Alpha Stack — Transaction Cost Analysis (TCA) Architecture
 
+> **Version:** 1.0 · **Date:** 2026-07-11 · **Author:** Architecture Team
+> **Source Research:** [`research/research_tca.md`](../research/research_tca.md) — Transaction cost analysis research
+> **Status:** Architecture Complete
+
+---
+
 **Version:** 1.0
 **Date:** 2026-07-13
 **Status:** Architecture Design

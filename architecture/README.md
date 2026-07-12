@@ -1,6 +1,6 @@
 # Alpha Stack — Architecture Index
 
-> **Generated:** 2026-07-13 · **Total Documents:** 34 · **Total Size:** ~3.2 GB
+> **Generated:** 2026-07-13 · **Total Documents:** 35 · **Total Size:** ~3.2 GB
 >
 > Every architecture document traces back to its source research. See the **Source Research** column for provenance.
 
@@ -30,45 +30,46 @@
 | 13 | [Pair-Specific Strategy](architecture_pair_strategy.md) | [Trading Pairs](../research/market/research_07_trading_pairs.md) (partial) | 79K |
 | 14 | [Strategy Flow](architecture_strategy_flow.md) | [Strategy Steps 1–16](../research/strategy/) | 82K |
 | 15 | [Trade Monitoring](architecture_trade_monitoring.md) | Cross-cutting — risk and strategy research | 167K |
+| 16 | [Transaction Cost Analysis](architecture_tca.md) | [TCA Research](../research/research_tca.md) | 2K |
 
 ## AI / ML Systems
 
 | # | Architecture Document | Research Source(s) | Size |
 |---|---|---|---|
-| 16 | [AI/ML Models](architecture_ai_models.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 102K |
-| 17 | [ML Pipeline](architecture_ml_pipeline.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 132K |
-| 18 | [Model Selection & Access](architecture_model_selection.md) | None — Architectural decision by design team | 39K |
-| 19 | [Multi-Agent System](architecture_multi_agent.md) | [Multi-Agent Systems](../research/research_03_loop_multiagent_systems.md) | 82K |
-| 20 | [Agent Communication](architecture_agent_communication.md) | [Multi-Agent Systems](../research/research_03_loop_multiagent_systems.md) | 100K |
-| 21 | [Memory System](architecture_memory.md) | [Multi-Agent Systems](../research/research_03_loop_multiagent_systems.md) (partial) | 118K |
+| 17 | [AI/ML Models](architecture_ai_models.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 102K |
+| 18 | [ML Pipeline](architecture_ml_pipeline.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 132K |
+| 19 | [Model Selection & Access](architecture_model_selection.md) | None — Architectural decision by design team | 39K |
+| 20 | [Multi-Agent System](architecture_multi_agent.md) | [Multi-Agent Systems](../research/research_03_loop_multiagent_systems.md) | 82K |
+| 21 | [Agent Communication](architecture_agent_communication.md) | [Multi-Agent Systems](../research/research_03_loop_multiagent_systems.md) | 100K |
+| 22 | [Memory System](architecture_memory.md) | [Multi-Agent Systems](../research/research_03_loop_multiagent_systems.md) (partial) | 118K |
 
 ## User Interface
 
 | # | Architecture Document | Research Source(s) | Size |
 |---|---|---|---|
-| 22 | [Desktop App UI](architecture_ui_desktop.md) | [Desktop App Architecture](../research/platform/research_12_desktop_app_architecture.md) | 108K |
-| 23 | [Web App UI](architecture_ui_web.md) | [Web App](../research/platform/research_web_app.md) | 134K |
-| 24 | [Mobile App UI](architecture_ui_mobile.md) | [Mobile App](../research/platform/research_mobile_app.md) | 166K |
+| 23 | [Desktop App UI](architecture_ui_desktop.md) | [Desktop App Architecture](../research/platform/research_12_desktop_app_architecture.md) | 108K |
+| 24 | [Web App UI](architecture_ui_web.md) | [Web App](../research/platform/research_web_app.md) | 134K |
+| 25 | [Mobile App UI](architecture_ui_mobile.md) | [Mobile App](../research/platform/research_mobile_app.md) | 166K |
 
 ## Curriculum & Education
 
 | # | Architecture Document | Research Source(s) | Size |
 |---|---|---|---|
-| 25 | [CS/IT Curriculum](architecture_curriculum_cs.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 97K |
-| 26 | [Economics Curriculum](architecture_curriculum_economics.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 82K |
-| 27 | [Curriculum Integration](architecture_curriculum_integration.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 54K |
-| 28 | [Mathematics Curriculum](architecture_curriculum_math.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 53K |
-| 29 | [Statistics Curriculum](architecture_curriculum_statistics.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 60K |
+| 26 | [CS/IT Curriculum](architecture_curriculum_cs.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 97K |
+| 27 | [Economics Curriculum](architecture_curriculum_economics.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 82K |
+| 28 | [Curriculum Integration](architecture_curriculum_integration.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 54K |
+| 29 | [Mathematics Curriculum](architecture_curriculum_math.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 53K |
+| 30 | [Statistics Curriculum](architecture_curriculum_statistics.md) | [ML/AI Curriculum](../research/curriculum/research_curriculum_ml_ai.md) | 60K |
 
 ## Operations & Cross-Cutting
 
 | # | Architecture Document | Research Source(s) | Size |
 |---|---|---|---|
-| 30 | [Integration Testing](architecture_testing.md) | Cross-cutting — all research | 117K |
-| 31 | [Monitoring](architecture_monitoring.md) | Cross-cutting — deployment and risk research | 88K |
-| 32 | [Performance Optimization](architecture_performance.md) | [Scalability](../research/research_scalability.md) | 87K |
-| 33 | [Channel & Notification](architecture_channels.md) | None — Architectural decision by design team | 36K |
-| 34 | [Documentation](architecture_documentation.md) | None — Architectural decision by design team | 63K |
+| 31 | [Integration Testing](architecture_testing.md) | Cross-cutting — all research | 117K |
+| 32 | [Monitoring](architecture_monitoring.md) | Cross-cutting — deployment and risk research | 88K |
+| 33 | [Performance Optimization](architecture_performance.md) | [Scalability](../research/research_scalability.md) | 87K |
+| 34 | [Channel & Notification](architecture_channels.md) | None — Architectural decision by design team | 36K |
+| 35 | [Documentation](architecture_documentation.md) | None — Architectural decision by design team | 63K |
 
 ---
 
