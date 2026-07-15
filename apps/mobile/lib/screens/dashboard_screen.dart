@@ -539,7 +539,8 @@ class _ConnectionDot extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(connectionStatusProvider);
+    final info = ref.watch(connectionStatusProvider);
+    final status = info.state;
     Color color = AlphaStackApp.textSecondary;
     switch (status) {
       case ConnectionStatus.connected:
@@ -571,7 +572,8 @@ class _ConnectionBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(connectionStatusProvider);
+    final info = ref.watch(connectionStatusProvider);
+    final status = info.state;
     if (status == ConnectionStatus.connected || status == ConnectionStatus.authenticated) {
       return const SizedBox.shrink();
     }
