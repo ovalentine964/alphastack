@@ -114,7 +114,7 @@ class SignalCard extends StatelessWidget {
                 children: [
                   _PriceLevel(
                     label: 'Entry',
-                    value: _formatPrice(signal.entryPrice),
+                    value: _formatPrice(signal.entryPrice ?? 0),
                   ),
                   if (signal.targetPrice != null)
                     _PriceLevel(

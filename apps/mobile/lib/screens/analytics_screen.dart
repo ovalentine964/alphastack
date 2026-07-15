@@ -222,7 +222,7 @@ class AnalyticsScreen extends ConsumerWidget {
                 maxY: 100,
                 barTouchData: BarTouchData(
                   touchTooltipData: BarTouchTooltipData(
-                    getTooltipColor: (_) => AlphaStackApp.surfaceDark,
+                    tooltipBgColor: AlphaStackApp.surfaceDark,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
                       return BarTooltipItem(
                         '${data[group.x].winRate.toStringAsFixed(1)}%\n',

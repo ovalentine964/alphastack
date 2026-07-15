@@ -610,7 +610,7 @@ class SignalsScreen extends ConsumerWidget {
                     children: [
                       _DetailRow(
                           'Entry Price',
-                          _formatPrice(signal.entryPrice),
+                          _formatPrice(signal.entryPrice ?? 0),
                           AlphaStackApp.textPrimary),
                       if (signal.targetPrice != null) ...[
                         const Divider(height: 16),

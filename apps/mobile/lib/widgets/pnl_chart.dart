@@ -122,7 +122,7 @@ class PnlChart extends StatelessWidget {
               borderData: FlBorderData(show: false),
               lineTouchData: LineTouchData(
                 touchTooltipData: LineTouchTooltipData(
-                  getTooltipColor: (_) => AlphaStackApp.surfaceDark,
+                  tooltipBgColor: AlphaStackApp.surfaceDark,
                   getTooltipItems: (spots) {
                     return spots.map((spot) {
                       final point = data[spot.x.toInt()];
