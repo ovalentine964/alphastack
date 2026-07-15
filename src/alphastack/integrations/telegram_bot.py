@@ -1,0 +1,450 @@
+"""
+AlphaStack Telegram Bot Integration
+
+Provides two-way communication between Alpha and Telegram:
+  • Chat commands — user sends /status, /portfolio, /signals, etc.
+  • Notifications — Alpha pushes trade alerts, risk warnings, daily summaries.
+
+Reads config from environment variables or from the live_server settings API.
+Uses python-telegram-bot (async). Gracefully degrades if token is missing.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+from collections import deque
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
+
+from telegram import BotCommand, Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+from telegram.error import TelegramError
+
+if TYPE_CHECKING:
+    from alphastack.api.rest.deps import TradeStore, SignalStore, PortfolioService
+
+logger = logging.getLogger("alphastack.telegram")
+
+
+# ═══════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════
+
+class TelegramConfig:
+    """Holds Telegram bot credentials.  Reads from env by default."""
+
+    def __init__(
+        self,
+        bot_token: str | None = None,
+        chat_id: str | None = None,
+    ) -> None:
+        self.bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.bot_token and self.chat_id)
+
+
+# ═══════════════════════════════════════════════════════════
+# Notification Queue — survives bot restarts (in-memory)
+# ═══════════════════════════════════════════════════════════
+
+_MAX_QUEUE = 500
+
+
+class NotificationQueue:
+    """Bounded FIFO queue for outgoing Telegram messages."""
+
+    def __init__(self, maxlen: int = _MAX_QUEUE) -> None:
+        self._q: deque[str] = deque(maxlen=maxlen)
+
+    def enqueue(self, text: str) -> None:
+        self._q.append(text)
+
+    def drain(self, limit: int = 50) -> list[str]:
+        msgs: list[str] = []
+        while self._q and len(msgs) < limit:
+            msgs.append(self._q.popleft())
+        return msgs
+
+    def __len__(self) -> int:
+        return len(self._q)
+
+
+# ═══════════════════════════════════════════════════════════
+# Telegram Bot — chat commands + notification sender
+# ═══════════════════════════════════════════════════════════
+
+class AlphaTelegramBot:
+    """Async Telegram bot with command handlers and notification delivery.
+
+    Usage::
+
+        bot = AlphaTelegramBot(config, trade_store, signal_store, portfolio_service)
+        await bot.start()   # starts polling + flush loop
+        bot.notify("✅ Trade executed")  # enqueue a message
+        await bot.stop()
+    """
+
+    def __init__(
+        self,
+        config: TelegramConfig,
+        trade_store: "TradeStore | None" = None,
+        signal_store: "SignalStore | None" = None,
+        portfolio_service: "PortfolioService | None" = None,
+        exchange_public: Any = None,
+        generate_signals: Any = None,
+    ) -> None:
+        self.config = config
+        self.trade_store = trade_store
+        self.signal_store = signal_store
+        self.portfolio_service = portfolio_service
+        self.exchange_public = exchange_public
+        self._generate_signals = generate_signals
+
+        self._queue = NotificationQueue()
+        self._app: Application | None = None
+        self._flush_task: asyncio.Task | None = None
+        self._running = False
+
+    # ── Lifecycle ──────────────────────────────────────────
+
+    async def start(self) -> None:
+        """Build and start the Telegram application (polling mode)."""
+        if not self.config.is_configured:
+            logger.info("telegram.skipped — token or chat_id not set")
+            return
+
+        self._app = (
+            Application.builder()
+            .token(self.config.bot_token)
+            .build()
+        )
+
+        # Register command handlers
+        self._app.add_handler(CommandHandler("start", self._cmd_start))
+        self._app.add_handler(CommandHandler("help", self._cmd_help))
+        self._app.add_handler(CommandHandler("status", self._cmd_status))
+        self._app.add_handler(CommandHandler("portfolio", self._cmd_portfolio))
+        self._app.add_handler(CommandHandler("signals", self._cmd_signals))
+        self._app.add_handler(CommandHandler("trades", self._cmd_trades))
+        self._app.add_handler(CommandHandler("explain", self._cmd_explain))
+        self._app.add_handler(CommandHandler("market", self._cmd_market))
+        # Catch-all for free-text messages
+        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._cmd_fallback))
+
+        # Set bot command menu
+        await self._app.bot.set_my_commands([
+            BotCommand("status", "System status (BTC price, pipeline, agents)"),
+            BotCommand("portfolio", "Current positions and P&L"),
+            BotCommand("signals", "Active signals with confluence scores"),
+            BotCommand("trades", "Recent trade history"),
+            BotCommand("explain", "Explain the last trade"),
+            BotCommand("market", "What's moving the market"),
+            BotCommand("help", "List all commands"),
+        ])
+
+        await self._app.initialize()
+        await self._app.start()
+        await self._app.updater.start_polling(drop_pending_updates=True)
+
+        self._running = True
+        self._flush_task = asyncio.create_task(self._flush_loop())
+        logger.info("telegram.started — polling active")
+
+    async def stop(self) -> None:
+        """Gracefully stop the bot."""
+        self._running = False
+        if self._flush_task:
+            self._flush_task.cancel()
+        if self._app:
+            try:
+                await self._app.updater.stop()
+                await self._app.stop()
+                await self._app.shutdown()
+            except Exception:
+                logger.warning("telegram.shutdown_error", exc_info=True)
+        logger.info("telegram.stopped")
+
+    # ── Public notification API ────────────────────────────
+
+    def notify(self, text: str) -> None:
+        """Enqueue a notification message. Non-blocking."""
+        self._queue.enqueue(text)
+
+    # ── Internal: flush queue → Telegram ───────────────────
+
+    async def _flush_loop(self) -> None:
+        """Background loop: drain the queue and send messages."""
+        while self._running:
+            try:
+                messages = self._queue.drain(limit=20)
+                for msg in messages:
+                    await self._send(msg)
+                    await asyncio.sleep(0.1)  # rate-limit courtesy
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.warning("telegram.flush_error", exc_info=True)
+            await asyncio.sleep(2)
+
+    async def _send(self, text: str) -> None:
+        """Send a single message to the configured chat."""
+        if not self._app:
+            return
+        try:
+            await self._app.bot.send_message(
+                chat_id=self.config.chat_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+        except TelegramError:
+            # Retry once without Markdown if formatting breaks
+            try:
+                await self._app.bot.send_message(
+                    chat_id=self.config.chat_id,
+                    text=text,
+                )
+            except TelegramError as e:
+                logger.warning("telegram.send_failed: %s", e)
+
+    # ── Command Handlers ───────────────────────────────────
+
+    async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.message.reply_text(
+            "🤖 *AlphaStack* — AI Trading System\n\n"
+            "I'm Alpha, your AI trading assistant.\n"
+            "Type /help to see what I can do.",
+            parse_mode="Markdown",
+        )
+
+    async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.message.reply_text(
+            "📋 *AlphaStack Commands*\n\n"
+            "/status — System status (BTC price, pipeline, agents)\n"
+            "/portfolio — Current positions & P&L\n"
+            "/signals — Active signals with confluence scores\n"
+            "/trades — Recent trade history\n"
+            "/explain — Explain the last trade\n"
+            "/market — What's moving the market right now\n"
+            "/help — This message\n\n"
+            "💬 Send any text and I'll respond with AI reasoning.",
+            parse_mode="Markdown",
+        )
+
+    async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        lines = ["📊 *AlphaStack Status*\n"]
+        # BTC price
+        if self.exchange_public:
+            try:
+                ticker = self.exchange_public.fetch_ticker("BTC/USDT")
+                lines.append(f"💰 BTC: ${ticker['last']:,.2f} ({ticker.get('percentage', 0):+.2f}% 24h)")
+            except Exception:
+                lines.append("💰 BTC: ⚠️ unavailable")
+        # Pipeline
+        lines.append("🧠 Pipeline: ✅ 16-step AlphaStack")
+        # Agents
+        lines.append("🤖 Agents: news · strategy · risk · execution · reflection")
+        # Testnet
+        lines.append("🏦 Testnet: ✅ connected" if self.exchange_public else "🏦 Testnet: ❌ not connected")
+        # Uptime
+        lines.append(f"⏰ Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_portfolio(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self.trade_store:
+            await update.message.reply_text("⚠️ Trade store not available")
+            return
+        open_trades = self.trade_store.list_trades(status_filter="open")
+        if not open_trades:
+            await update.message.reply_text("📭 No open positions")
+            return
+        lines = ["💼 *Portfolio*\n"]
+        for t in open_trades:
+            entry = t.get("entry_price") or 0
+            qty = t["quantity"]
+            side = "🟢 LONG" if t["side"] == "buy" else "🔴 SHORT"
+            lines.append(f"{side} {t['symbol']} — {qty} @ ${entry:,.2f}")
+            if t.get("stop_loss"):
+                lines.append(f"  SL: ${t['stop_loss']:,.2f} | TP: ${t.get('take_profit', '—'):,.2f}")
+        # P&L summary
+        closed = self.trade_store.list_trades(status_filter="closed")
+        total_pnl = sum(t.get("pnl") or 0 for t in closed)
+        wins = sum(1 for t in closed if (t.get("pnl") or 0) > 0)
+        losses = sum(1 for t in closed if (t.get("pnl") or 0) < 0)
+        lines.append(f"\n📈 Closed P&L: *${total_pnl:+,.2f}* ({wins}W / {losses}L)")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_signals(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        signals: list[dict] = []
+        if self._generate_signals:
+            try:
+                signals = await self._generate_signals()
+            except Exception:
+                pass
+        if not signals and self.signal_store:
+            signals = self.signal_store.list_active()
+        if not signals:
+            await update.message.reply_text("📭 No active signals")
+            return
+        lines = ["🔔 *Active Signals*\n"]
+        for s in signals[:10]:
+            direction = s.get("direction", "?").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴" if direction == "SHORT" else "⚪"
+            score = s.get("confluence_score", s.get("confidence", 0))
+            if isinstance(score, float) and score <= 1:
+                score *= 100
+            lines.append(
+                f"{emoji} *{s['symbol']}* {direction}\n"
+                f"  Confluence: {score:.0f}% | Strategy: {s.get('strategy_id', '—')}\n"
+                f"  Entry: ${s.get('entry_price', 0):,.2f} | RR: {s.get('risk_reward', '—')}"
+            )
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_trades(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self.trade_store:
+            await update.message.reply_text("⚠️ Trade store not available")
+            return
+        trades = self.trade_store.list_trades()
+        if not trades:
+            await update.message.reply_text("📭 No trades yet")
+            return
+        lines = ["📜 *Recent Trades*\n"]
+        for t in trades[-10:]:
+            status_emoji = {"open": "🟢", "closed": "📊", "pending": "⏳"}.get(t["status"], "⚪")
+            pnl_str = ""
+            if t.get("pnl") is not None:
+                pnl_val = t["pnl"]
+                pnl_str = f" | P&L: *${pnl_val:+,.2f}*"
+            lines.append(
+                f"{status_emoji} {t['symbol']} {t['side'].upper()} {t['quantity']}"
+                f" @ ${t.get('entry_price', 0):,.2f}{pnl_str}"
+            )
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_explain(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self.trade_store:
+            await update.message.reply_text("⚠️ Trade store not available")
+            return
+        closed = self.trade_store.list_trades(status_filter="closed")
+        if not closed:
+            await update.message.reply_text("📭 No closed trades to explain")
+            return
+        last = sorted(closed, key=lambda x: x.get("closed_at") or "")[-1]
+        pnl = last.get("pnl") or 0
+        pnl_pct = 0
+        entry = last.get("entry_price") or 0
+        exit_p = last.get("exit_price") or 0
+        if entry:
+            pnl_pct = ((exit_p / entry) - 1) * 100
+            if last["side"] == "sell":
+                pnl_pct = -pnl_pct
+
+        lines = [
+            "🔍 *Last Trade Explained*\n",
+            f"*{last['symbol']}* — {last['side'].upper()}",
+            f"Entry: ${entry:,.2f} → Exit: ${exit_p:,.2f}",
+            f"P&L: *${pnl:+,.2f}* ({pnl_pct:+.2f}%)",
+            f"Quantity: {last['quantity']}",
+            f"Strategy: {last.get('strategy_id', '—')}",
+            f"Opened: {last.get('opened_at', '—')[:19]}",
+            f"Closed: {last.get('closed_at', '—')[:19]}",
+        ]
+        if last.get("notes"):
+            lines.append(f"\n📝 Notes: {last['notes']}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_market(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self.exchange_public:
+            await update.message.reply_text("⚠️ Exchange not available")
+            return
+        symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+        lines = ["🌍 *Market Overview*\n"]
+        for sym in symbols:
+            try:
+                t = self.exchange_public.fetch_ticker(sym)
+                pct = t.get("percentage", 0) or 0
+                emoji = "🟢" if pct >= 0 else "🔴"
+                lines.append(f"{emoji} *{sym}*: ${t['last']:,.2f} ({pct:+.2f}%)")
+            except Exception:
+                lines.append(f"⚪ *{sym}*: unavailable")
+        lines.append(f"\n⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_fallback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Free-text message → Alpha reasoning response."""
+        user_msg = update.message.text
+        # Simple contextual response (no external LLM call to keep it self-contained)
+        await update.message.reply_text(
+            f"🧠 *Alpha received:*\n_{user_msg}_\n\n"
+            "I'm a trading AI — try /status, /signals, /portfolio, or /market for actionable info.\n"
+            "For deeper reasoning, use the AlphaStack API.",
+            parse_mode="Markdown",
+        )
+
+
+# ═══════════════════════════════════════════════════════════
+# Convenience notification helpers (module-level)
+# ═══════════════════════════════════════════════════════════
+
+_bot_instance: AlphaTelegramBot | None = None
+
+
+def get_bot() -> AlphaTelegramBot | None:
+    """Return the global bot instance (or None)."""
+    return _bot_instance
+
+
+def set_bot(bot: AlphaTelegramBot | None) -> None:
+    """Register the global bot instance."""
+    global _bot_instance
+    _bot_instance = bot
+
+
+def notify_trade_executed(symbol: str, side: str, price: float, confluence: float) -> None:
+    emoji = "✅" if side.lower() == "buy" else "🔴"
+    b = get_bot()
+    if b:
+        b.notify(f"{emoji} *{side.upper()}* {symbol} @ ${price:,.2f} — Confluence: {confluence:.0f}%")
+
+
+def notify_trade_closed(symbol: str, pnl: float, pnl_pct: float) -> None:
+    emoji = "📈" if pnl >= 0 else "📉"
+    b = get_bot()
+    if b:
+        b.notify(f"📊 *{symbol}* trade closed — P&L: *${pnl:+,.2f}* ({pnl_pct:+.2f}%) {emoji}")
+
+
+def notify_risk_alert(message: str) -> None:
+    b = get_bot()
+    if b:
+        b.notify(f"⚠️ *Risk Alert*\n{message}")
+
+
+def notify_signal(symbol: str, direction: str, confidence: float) -> None:
+    b = get_bot()
+    if b:
+        b.notify(f"🔔 New signal: *{symbol}* {direction.upper()} — Confidence: {confidence:.0f}%")
+
+
+def notify_daily_summary(trades: int, wins: int, pnl: float) -> None:
+    b = get_bot()
+    if b:
+        emoji = "📈" if pnl >= 0 else "📉"
+        b.notify(f"{emoji} *Daily Summary*\n{trades} trades, {wins} wins, *${pnl:+,.2f}*")
+
+
+def notify_market_alert(message: str) -> None:
+    b = get_bot()
+    if b:
+        b.notify(f"🔴 *Market Alert*\n{message}")

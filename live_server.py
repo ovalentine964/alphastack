@@ -56,7 +56,13 @@ from alphastack.api.rest.deps import TradeStore, SignalStore, PortfolioService
 from alphastack.security.validators import InputValidator
 from alphastack.agi.memory import EpisodicMemory, TradeEpisode
 from alphastack.agi.planning import TradePlanner
+from alphastack.engine.loop import TradingLoop, LoopConfig, LoopState, Interval
 from alphastack.utils.logger import setup_logging, get_logger
+from alphastack.integrations.telegram_bot import (
+    AlphaTelegramBot,
+    TelegramConfig,
+    set_bot as set_telegram_bot,
+)
 
 logger = get_logger("alphastack.live")
 
@@ -154,6 +160,12 @@ orchestrator = AlphaStackOrchestrator(
 # Signal cache
 _SIGNAL_CACHE: dict[str, Any] = {"signals": [], "ts": 0.0}
 _SIGNAL_TTL = 60
+
+# Trading loop (initialized after helpers are defined)
+trading_loop: Optional[TradingLoop] = None
+
+# Telegram bot (initialized in lifespan if configured)
+_telegram_bot: AlphaTelegramBot | None = None
 
 # Token store
 _ACTIVE_TOKENS: dict[str, dict] = {}
@@ -371,6 +383,20 @@ async def _run_orchestrator(symbol: str) -> dict[str, Any]:
         return {}
 
 
+def _init_trading_loop() -> TradingLoop:
+    """Create the TradingLoop singleton wired to existing singletons."""
+    cfg = LoopConfig(interval=Interval.H4)
+    return TradingLoop(
+        config=cfg,
+        build_market_data=_build_market_data,
+        run_pipeline=_run_pipeline_signal,
+        run_orchestrator=_run_orchestrator,
+        trade_store=trade_store,
+        episodic_memory=episodic_memory,
+        event_bus=event_bus,
+    )
+
+
 async def _generate_signals() -> list[dict[str, Any]]:
     """Generate signals using the pipeline, with caching."""
     now = time.time()
@@ -442,16 +468,46 @@ rate_limiter = RateLimiter()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _telegram_bot, trading_loop
     setup_logging(json_output=False)
     logger.info("api_startup")
     await event_bus.connect()
     logger.info("api_startup.event_bus_connected")
+    trading_loop = _init_trading_loop()
+    logger.info("api_startup.trading_loop_initialized")
+
+    # Start Telegram bot if configured
+    tg_config = TelegramConfig()
+    if tg_config.is_configured:
+        _telegram_bot = AlphaTelegramBot(
+            config=tg_config,
+            trade_store=trade_store,
+            signal_store=signal_store,
+            portfolio_service=portfolio_service,
+            exchange_public=exchange_public,
+            generate_signals=_generate_signals,
+        )
+        set_telegram_bot(_telegram_bot)
+        asyncio.create_task(_telegram_bot.start())
+        logger.info("telegram_bot.starting")
+
     yield
+
+    # Graceful shutdown: stop loop before closing event bus
+    if trading_loop and trading_loop.state.running:
+        await trading_loop.stop()
+
+    # Shutdown Telegram bot
+    if _telegram_bot:
+        await _telegram_bot.stop()
+        _telegram_bot = None
+        set_telegram_bot(None)
+
     await event_bus.close()
     logger.info("api_shutdown")
 
 
-app = FastAPI(title="AlphaStack API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AlphaStack API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
@@ -846,6 +902,54 @@ async def analytics_risk():
 
 
 # ═══════════════════════════════════════════════════════════
+# TRADING LOOP ENDPOINTS (continuous loop engine)
+# ═══════════════════════════════════════════════════════════
+
+class LoopConfigUpdate(BaseModel):
+    interval: Optional[str] = None
+    symbols: Optional[list[str]] = None
+    max_concurrent_trades: Optional[int] = None
+    cooldown_after_loss: Optional[int] = None
+    evolution_enabled: Optional[bool] = None
+
+
+@app.post("/api/v1/loop/start")
+async def loop_start():
+    """Start the continuous trading loop."""
+    if trading_loop is None:
+        raise HTTPException(503, "Trading loop not initialized")
+    result = await trading_loop.start()
+    return result
+
+
+@app.post("/api/v1/loop/stop")
+async def loop_stop():
+    """Gracefully stop the trading loop (finishes current cycle)."""
+    if trading_loop is None:
+        raise HTTPException(503, "Trading loop not initialized")
+    result = await trading_loop.stop()
+    return result
+
+
+@app.get("/api/v1/loop/status")
+async def loop_status():
+    """Get current loop status, config, and state."""
+    if trading_loop is None:
+        raise HTTPException(503, "Trading loop not initialized")
+    return trading_loop.status()
+
+
+@app.patch("/api/v1/loop/config")
+async def loop_config_update(body: LoopConfigUpdate):
+    """Hot-update loop configuration (takes effect next cycle)."""
+    if trading_loop is None:
+        raise HTTPException(503, "Trading loop not initialized")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = await trading_loop.update_config(**updates)
+    return result
+
+
+# ═══════════════════════════════════════════════════════════
 # ORCHESTRATOR ENDPOINT (full multi-agent pipeline)
 # ═══════════════════════════════════════════════════════════
 
@@ -992,6 +1096,55 @@ async def health():
 @app.get("/api/v1/settings/exchange")
 async def exchange_settings():
     return {"exchange": "Binance", "mode": "testnet", "api_keys_configured": exchange_testnet is not None}
+
+
+# ═══════════════════════════════════════════════════════════
+# TELEGRAM CONFIG ENDPOINT
+# ═══════════════════════════════════════════════════════════
+
+class TelegramConfigRequest(BaseModel):
+    bot_token: Optional[str] = None
+    chat_id: Optional[str] = None
+
+
+@app.get("/api/v1/config/telegram")
+async def get_telegram_config():
+    return {
+        "configured": _telegram_bot is not None,
+        "bot_token_set": bool(os.environ.get("TELEGRAM_BOT_TOKEN")),
+        "chat_id_set": bool(os.environ.get("TELEGRAM_CHAT_ID")),
+    }
+
+
+@app.post("/api/v1/config/telegram")
+async def set_telegram_config(body: TelegramConfigRequest):
+    global _telegram_bot
+    if body.bot_token:
+        os.environ["TELEGRAM_BOT_TOKEN"] = body.bot_token
+    if body.chat_id:
+        os.environ["TELEGRAM_CHAT_ID"] = body.chat_id
+
+    # Restart bot with new config
+    if _telegram_bot:
+        await _telegram_bot.stop()
+        _telegram_bot = None
+        set_telegram_bot(None)
+
+    tg_config = TelegramConfig()
+    if tg_config.is_configured:
+        _telegram_bot = AlphaTelegramBot(
+            config=tg_config,
+            trade_store=trade_store,
+            signal_store=signal_store,
+            portfolio_service=portfolio_service,
+            exchange_public=exchange_public,
+            generate_signals=_generate_signals,
+        )
+        set_telegram_bot(_telegram_bot)
+        asyncio.create_task(_telegram_bot.start())
+        return {"message": "Telegram bot configured and starting", "configured": True}
+
+    return {"message": "Incomplete config — provide both bot_token and chat_id", "configured": False}
 
 
 # ═══════════════════════════════════════════════════════════

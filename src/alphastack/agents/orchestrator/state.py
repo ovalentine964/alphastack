@@ -125,6 +125,13 @@ class AlphaStackState(BaseModel):
     pending_orders: list[dict[str, Any]] = Field(default_factory=list)
 
     # -- Reflection ---------------------------------------------------------
+    pre_trade_reflection: dict[str, Any] = Field(default_factory=dict)
+    """Pre-trade signal reflection verdict.
+
+    Keys: verdict (APPROVE/REJECT/MODIFY), reasoning, confidence,
+    signal_verdicts (per-signal detail).
+    """
+
     performance_summary: dict[str, Any] = Field(default_factory=dict)
     strategy_adjustments: list[dict[str, Any]] = Field(default_factory=list)
 
