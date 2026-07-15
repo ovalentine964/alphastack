@@ -1,0 +1,19 @@
+title: AlphaStack
+description: Institutional-Grade AI Trading
+url: ""
+baseurl: ""
+
+theme: null
+plugins: []
+
+# Build settings
+markdown: kramdown
+encoding: UTF-8
+
+# Exclude from processing
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
