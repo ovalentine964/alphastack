@@ -533,6 +533,108 @@ class _WsConnectionIndicatorState extends State<_WsConnectionIndicator> {
   }
 }
 
+/// Connection status dot (green/red/yellow).
+class _ConnectionDot extends ConsumerWidget {
+  const _ConnectionDot();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(connectionStatusProvider);
+    Color color;
+    switch (status) {
+      case ConnectionStatus.connected:
+        color = AlphaStackApp.accentGreen;
+        break;
+      case ConnectionStatus.connecting:
+      case ConnectionStatus.authenticated:
+        color = AlphaStackApp.accentOrange;
+        break;
+      case ConnectionStatus.disconnected:
+      case ConnectionStatus.error:
+        color = AlphaStackApp.accentRed;
+        break;
+    }
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+/// Connection banner at top of dashboard.
+class _ConnectionBanner extends ConsumerWidget {
+  const _ConnectionBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(connectionStatusProvider);
+    if (status == ConnectionStatus.connected || status == ConnectionStatus.authenticated) {
+      return const SizedBox.shrink();
+    }
+    Color bgColor;
+    Color textColor;
+    String text;
+    IconData icon;
+    switch (status) {
+      case ConnectionStatus.disconnected:
+        bgColor = AlphaStackApp.accentRed.withAlpha(20);
+        textColor = AlphaStackApp.accentRed;
+        text = 'Disconnected — set API endpoint in Settings';
+        icon = Icons.cloud_off;
+        break;
+      case ConnectionStatus.connecting:
+        bgColor = AlphaStackApp.accentOrange.withAlpha(20);
+        textColor = AlphaStackApp.accentOrange;
+        text = 'Connecting...';
+        icon = Icons.sync;
+        break;
+      case ConnectionStatus.error:
+        bgColor = AlphaStackApp.accentRed.withAlpha(20);
+        textColor = AlphaStackApp.accentRed;
+        text = 'Connection error — check your settings';
+        icon = Icons.error_outline;
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: textColor.withAlpha(80)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: textColor, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              // Navigate to settings
+            },
+            child: Text('Settings', style: TextStyle(color: textColor)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Offline state indicator.
 class _OfflineIndicator extends StatelessWidget {
   const _OfflineIndicator();

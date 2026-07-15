@@ -33,8 +33,14 @@ exchange_public = ccxt.binance({
     'options': {'defaultType': 'spot'},
 })
 
-# Testnet for trading (needs keys)
-exchange_testnet = None  # Set up when user provides keys
+# Testnet for trading — configured with user's testnet keys
+exchange_testnet = ccxt.binance({
+    'apiKey': 'RMO3Gq9e7iYpctkI5QRVOi0nv3yA8VjIh8u7pTPtr9F9109TuxHMlDtFnGBLWrth',
+    'secret': 'f7BkykOaAZlh18a83n4kXcmlKxu6V02yggIkKb9wkYHbvT2nVOhZF2BEhJSfsfUV',
+    'enableRateLimit': True,
+    'options': {'defaultType': 'spot'},
+})
+exchange_testnet.set_sandbox_mode(True)  # Binance TESTNET mode
 
 # Demo balance
 VIRTUAL_BALANCE = {
@@ -140,26 +146,32 @@ async def portfolio_summary():
         try:
             balance = exchange_testnet.fetch_balance()
             total = balance.get('total', {})
+            usdt_free = balance.get('USDT', {}).get('free', 0)
+            usdt_total = balance.get('USDT', {}).get('total', 0)
+            btc_total = balance.get('BTC', {}).get('total', 0)
+            # Get BTC price for value calculation
+            btc_ticker = exchange_public.fetch_ticker('BTC/USDT')
+            btc_price = btc_ticker['last']
+            total_value = usdt_total + (btc_total * btc_price)
             return {
-                "total_value": sum(v for v in total.values() if v and v > 0),
-                "available_balance": balance.get('USDT', {}).get('free', 0),
+                "total_value": round(total_value, 2),
+                "available_balance": round(usdt_free, 2),
                 "unrealized_pnl": 0,
                 "realized_pnl": 0,
                 "positions_count": len(POSITIONS),
                 "win_rate": 68.5,
+                "btc_balance": btc_total,
+                "mode": "testnet",
+                "exchange": "Binance Testnet",
             }
-        except:
-            pass
+        except Exception as e:
+            return {"error": str(e), "mode": "testnet"}
     
-    # Fallback to virtual balance
     total = sum(VIRTUAL_BALANCE.values())
     return {
         "total_value": total,
         "available_balance": VIRTUAL_BALANCE.get('USDT', 0),
-        "unrealized_pnl": 0,
-        "realized_pnl": 0,
-        "positions_count": len(POSITIONS),
-        "win_rate": 68.5,
+        "mode": "demo",
     }
 
 @app.get("/api/v1/portfolio/positions")
