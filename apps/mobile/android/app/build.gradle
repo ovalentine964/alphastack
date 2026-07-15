@@ -22,6 +22,11 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0.0'
 }
 
+def keystoreFilePath = System.getenv("KEYSTORE_PATH") ?: ""
+def keystorePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+def keyAlias = System.getenv("KEY_ALIAS") ?: ""
+def keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+
 android {
     namespace "com.alphastack.mobile"
     compileSdk 34
@@ -48,11 +53,24 @@ android {
         versionName flutterVersionName
     }
 
+    signingConfigs {
+        release {
+            if (keystoreFilePath.isNotEmpty() && keystorePassword.isNotEmpty()) {
+                storeFile file(keystoreFilePath)
+                storePassword keystorePassword
+                keyAlias keyAlias
+                keyPassword keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
-            // TODO: Configure proper signing for production release
-            // signingConfig signingConfigs.release
+            if (keystoreFilePath.isNotEmpty() && keystorePassword.isNotEmpty()) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

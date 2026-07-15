@@ -73,6 +73,21 @@ jobs:
         with:
           flutter-version: 3.24.0
 
+      - name: Setup signing keystore
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: apps/mobile/android/app
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+          echo "KEYSTORE_PATH=${{ github.workspace }}/apps/mobile/android/app/release.keystore" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+          echo "KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+
       - name: Build Android APK
         working-directory: apps/mobile
         run: |
