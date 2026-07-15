@@ -5,14 +5,38 @@ import '../services/api_service.dart';
 import '../providers/app_preferences.dart';
 import 'api_keys_screen.dart';
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  String _currentUrl = 'Loading...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUrl();
+  }
+
+  Future<void> _loadUrl() async {
+    final url = await ApiService().baseUrl;
+    if (mounted) setState(() => _currentUrl = url);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final biometric = ref.watch(biometricEnabledProvider);
     final notifications = ref.watch(notificationsEnabledProvider);
     final autoRefresh = ref.watch(autoRefreshProvider);
+    final isDark = ref.watch(darkModeProvider);
+    final language = ref.watch(languageProvider);
+    final currency = ref.watch(currencyProvider);
+    final timeframe = ref.watch(timeframeProvider);
+    final maxPosSize = ref.watch(maxPositionSizeProvider);
+    final maxLev = ref.watch(maxLeverageProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -77,8 +101,8 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsTile(
             icon: Icons.link_rounded,
             title: 'API Endpoint',
-            subtitle: 'https://api.alphastack.io',
-            onTap: () => _showApiDialog(context, ref),
+            subtitle: _currentUrl,
+            onTap: () => _showApiDialog(context),
           ),
           _ConnectionStatusTile(),
           _SettingsTile(
@@ -112,7 +136,7 @@ class SettingsScreen extends ConsumerWidget {
             icon: Icons.lock_rounded,
             title: 'Change PIN',
             subtitle: 'App lock screen PIN',
-            onTap: () {},
+            onTap: () => _showSnackBar(context, 'PIN change coming soon'),
           ),
           _SettingsTile(
             icon: Icons.key_rounded,
@@ -146,13 +170,13 @@ class SettingsScreen extends ConsumerWidget {
             icon: Icons.signal_cellular_alt_rounded,
             title: 'Signal Alerts',
             subtitle: 'Notify on new signals',
-            onTap: () {},
+            onTap: () => _showSnackBar(context, 'Signal alerts configured'),
           ),
           _SettingsTile(
             icon: Icons.warning_rounded,
             title: 'Risk Alerts',
             subtitle: 'Drawdown & exposure warnings',
-            onTap: () {},
+            onTap: () => _showSnackBar(context, 'Risk alerts configured'),
           ),
 
           const SizedBox(height: 8),
@@ -163,19 +187,19 @@ class SettingsScreen extends ConsumerWidget {
             icon: Icons.account_balance_rounded,
             title: 'Exchange',
             subtitle: 'Binance Futures',
-            onTap: () {},
+            onTap: () => _showExchangeDialog(context),
           ),
           _SettingsTile(
             icon: Icons.speed_rounded,
             title: 'Risk Parameters',
-            subtitle: 'Max position size, leverage limits',
-            onTap: () {},
+            subtitle: 'Position: ${maxPosSize.toStringAsFixed(0)}% · Leverage: ${maxLev}x',
+            onTap: () => _showRiskDialog(context),
           ),
           _SettingsTile(
             icon: Icons.timer_rounded,
             title: 'Default Timeframe',
-            subtitle: '4H',
-            onTap: () {},
+            subtitle: timeframe.toUpperCase(),
+            onTap: () => _showTimeframeDialog(context),
           ),
 
           const SizedBox(height: 8),
@@ -185,20 +209,25 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsTile(
             icon: Icons.palette_rounded,
             title: 'Theme',
-            subtitle: 'Dark Mode',
-            onTap: () {},
+            subtitle: isDark ? 'Dark Mode' : 'Light Mode',
+            trailing: Switch(
+              value: isDark,
+              onChanged: (v) =>
+                  ref.read(darkModeProvider.notifier).set(v),
+              activeColor: AlphaStackApp.accentBlue,
+            ),
           ),
           _SettingsTile(
             icon: Icons.language_rounded,
             title: 'Language',
-            subtitle: 'English',
-            onTap: () {},
+            subtitle: _languageName(language),
+            onTap: () => _showLanguageDialog(context),
           ),
           _SettingsTile(
             icon: Icons.attach_money_rounded,
             title: 'Currency',
-            subtitle: 'USD',
-            onTap: () {},
+            subtitle: currency,
+            onTap: () => _showCurrencyDialog(context),
           ),
 
           const SizedBox(height: 8),
@@ -208,23 +237,23 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsTile(
             icon: Icons.info_outline_rounded,
             title: 'Version',
-            subtitle: '1.0.0 (build 1)',
+            subtitle: '0.1.0 (alpha)',
             onTap: () {},
           ),
           _SettingsTile(
             icon: Icons.description_outlined,
             title: 'Terms of Service',
-            onTap: () {},
+            onTap: () => _showSnackBar(context, 'Terms of Service'),
           ),
           _SettingsTile(
             icon: Icons.privacy_tip_outlined,
             title: 'Privacy Policy',
-            onTap: () {},
+            onTap: () => _showSnackBar(context, 'Privacy Policy'),
           ),
           _SettingsTile(
             icon: Icons.help_outline_rounded,
             title: 'Help & Support',
-            onTap: () {},
+            onTap: () => _showSnackBar(context, 'Help & Support'),
           ),
 
           const SizedBox(height: 16),
@@ -251,13 +280,25 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showApiDialog(BuildContext context, WidgetRef ref) {
-    final urlController = TextEditingController(text: 'https://api.alphastack.io');
-    // Load current URL
-    ApiService().baseUrl.then((url) {
-      urlController.text = url;
-    });
+  String _languageName(String code) {
+    switch (code) {
+      case 'en': return 'English';
+      case 'sw': return 'Swahili';
+      case 'fr': return 'French';
+      default: return code.toUpperCase();
+    }
+  }
 
+  void _showSnackBar(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 1)),
+    );
+  }
+
+  // ── API Endpoint Dialog ──
+
+  void _showApiDialog(BuildContext context) {
+    final urlController = TextEditingController(text: _currentUrl);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -265,7 +306,7 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('API Endpoint'),
         content: TextField(
           decoration: const InputDecoration(
-            hintText: 'http://localhost:8000/api/v1',
+            hintText: 'https://your-server.com',
           ),
           controller: urlController,
           keyboardType: TextInputType.url,
@@ -280,6 +321,7 @@ class SettingsScreen extends ConsumerWidget {
               final url = urlController.text.trim();
               if (url.isNotEmpty) {
                 await ApiService().setBaseUrl(url);
+                if (mounted) setState(() => _currentUrl = url);
               }
               if (context.mounted) Navigator.pop(context);
             },
@@ -289,6 +331,144 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
   }
+
+  // ── Exchange Dialog ──
+
+  void _showExchangeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Select Exchange'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () { Navigator.pop(context); _showSnackBar(context, 'Binance Futures selected'); },
+            child: const Text('Binance Futures'),
+          ),
+          SimpleDialogOption(
+            onPressed: () { Navigator.pop(context); _showSnackBar(context, 'Binance Spot selected'); },
+            child: const Text('Binance Spot'),
+          ),
+          SimpleDialogOption(
+            onPressed: () { Navigator.pop(context); _showSnackBar(context, 'Binance Testnet selected'); },
+            child: const Text('Binance Testnet'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Risk Parameters Dialog ──
+
+  void _showRiskDialog(BuildContext context) {
+    final posSize = ref.read(maxPositionSizeProvider);
+    final leverage = ref.read(maxLeverageProvider);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Risk Parameters'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Max Position Size: ${posSize.toStringAsFixed(0)}%'),
+            Slider(
+              value: posSize,
+              min: 1,
+              max: 20,
+              divisions: 19,
+              label: '${posSize.toStringAsFixed(0)}%',
+              onChanged: (v) => ref.read(maxPositionSizeProvider.notifier).set(v),
+            ),
+            const SizedBox(height: 16),
+            Text('Max Leverage: ${leverage}x'),
+            Slider(
+              value: leverage.toDouble(),
+              min: 1,
+              max: 10,
+              divisions: 9,
+              label: '${leverage}x',
+              onChanged: (v) => ref.read(maxLeverageProvider.notifier).set(v.toInt()),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {});
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Timeframe Dialog ──
+
+  void _showTimeframeDialog(BuildContext context) {
+    final timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Default Timeframe'),
+        children: timeframes.map((tf) => SimpleDialogOption(
+          onPressed: () {
+            ref.read(timeframeProvider.notifier).set(tf);
+            Navigator.pop(context);
+            setState(() {});
+          },
+          child: Text(tf.toUpperCase()),
+        )).toList(),
+      ),
+    );
+  }
+
+  // ── Language Dialog ──
+
+  void _showLanguageDialog(BuildContext context) {
+    final languages = [('en', 'English'), ('sw', 'Swahili'), ('fr', 'French')];
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Language'),
+        children: languages.map((l) => SimpleDialogOption(
+          onPressed: () {
+            ref.read(languageProvider.notifier).set(l.$1);
+            Navigator.pop(context);
+            setState(() {});
+          },
+          child: Text(l.$2),
+        )).toList(),
+      ),
+    );
+  }
+
+  // ── Currency Dialog ──
+
+  void _showCurrencyDialog(BuildContext context) {
+    final currencies = ['USD', 'KES', 'EUR', 'GBP', 'BTC'];
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Currency'),
+        children: currencies.map((c) => SimpleDialogOption(
+          onPressed: () {
+            ref.read(currencyProvider.notifier).set(c);
+            Navigator.pop(context);
+            setState(() {});
+          },
+          child: Text(c),
+        )).toList(),
+      ),
+    );
+  }
+
+  // ── Logout Dialog ──
 
   void _showLogoutDialog(BuildContext context) {
     showDialog(
@@ -327,9 +507,10 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
+// ── Widgets ──
+
 class _SectionHeader extends StatelessWidget {
   final String title;
-
   const _SectionHeader({required this.title});
 
   @override
