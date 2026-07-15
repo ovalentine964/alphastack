@@ -53,7 +53,7 @@ class AnalyticsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
+    final _theme = Theme.of(context);
     final performance = ref.watch(performanceProvider);
     final pnlHistory = ref.watch(pnlHistoryProvider);
     final winRateHistory = ref.watch(winRateHistoryProvider);

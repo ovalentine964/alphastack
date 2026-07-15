@@ -64,11 +64,7 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionInfo> {
         return;
       }
 
-      // Step 2: Check if we already have a valid token
-      final keys = await _api.getStoredApiKeys();
-      final hasToken = (await _api.getBinanceApiKey()) != null;
-
-      // Step 3: Authenticate (with stored keys or demo credentials)
+      // Step 2: Authenticate (with stored keys or demo credentials)
       state = state.copyWith(
         state: ConnectionStatus.connecting,
         message: 'Authenticating...',

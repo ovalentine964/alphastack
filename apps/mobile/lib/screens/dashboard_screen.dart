@@ -89,7 +89,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final _theme = Theme.of(context);
     final portfolio = ref.watch(portfolioProvider);
     final positions = ref.watch(positionsProvider);
     final signals = ref.watch(recentSignalsProvider);
@@ -244,7 +244,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Widget _buildPortfolioFromApi(Map<String, dynamic> data) {
     // Server PnL response has different field names than the old mock
-    final totalRealized = (data['total_realized_pnl'] as num?)?.toDouble() ?? 0;
     final totalUnrealized =
         (data['total_unrealized_pnl'] as num?)?.toDouble() ?? 0;
     final totalPnl = (data['total_pnl'] as num?)?.toDouble() ?? 0;

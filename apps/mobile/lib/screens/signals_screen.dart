@@ -56,7 +56,7 @@ class SignalsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
+    final _theme = Theme.of(context);
     final signals = ref.watch(signalsListProvider);
     final filters = ref.watch(signalFiltersProvider);
 
@@ -179,7 +179,7 @@ class SignalsScreen extends ConsumerWidget {
 
   Widget _buildSummary(
       BuildContext context, List<Signal> all, List<Signal> active) {
-    final theme = Theme.of(context);
+    final _theme = Theme.of(context);
     final highConf = active.where((s) => s.confluenceScore >= 0.7).length;
     final avgScore = active.isEmpty
         ? 0.0
@@ -215,8 +215,8 @@ class SignalsScreen extends ConsumerWidget {
   Widget _buildFilterBar(BuildContext context, WidgetRef ref,
       List<Signal> active, SignalFilters current) {
     // Extract available pairs and timeframes from signals
-    final pairs = active.map((s) => s.symbol).toSet().toList()..sort();
-    final timeframes =
+    final _pairs = active.map((s) => s.symbol).toSet().toList()..sort();
+    final _timeframes =
         active.map((s) => s.timeframe).whereType<String>().toSet().toList()
           ..sort();
 
@@ -661,10 +661,10 @@ class SignalsScreen extends ConsumerWidget {
                                 .textTheme
                                 .titleMedium
                                 ?.copyWith(fontWeight: FontWeight.w600)),
-                        if (signal.confidence != null) ...[
+                        if (signal.confidence > 0) ...[
                           const SizedBox(height: 8),
                           Text(
-                              'AI Confidence: ${(signal.confidence! * 100).toStringAsFixed(0)}%',
+                              'AI Confidence: ${(signal.confidence * 100).toStringAsFixed(0)}%',
                               style: Theme.of(ctx)
                                   .textTheme
                                   .bodySmall
