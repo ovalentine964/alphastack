@@ -321,7 +321,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -331,7 +331,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 await ApiService().setBaseUrl(url);
                 if (mounted) setState(() => _currentUrl = url);
               }
-              if (context.mounted) Navigator.pop(context);
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
             },
             child: const Text('Save'),
           ),
@@ -415,7 +415,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         actions: [
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               setState(() {});
             },
             child: const Text('Save'),
@@ -437,7 +437,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: timeframes.map((tf) => SimpleDialogOption(
           onPressed: () {
             ref.read(timeframeProvider.notifier).set(tf);
-            Navigator.pop(context);
+            Navigator.pop(dialogContext);
             setState(() {});
           },
           child: Text(tf.toUpperCase()),
@@ -458,7 +458,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: languages.map((l) => SimpleDialogOption(
           onPressed: () {
             ref.read(languageProvider.notifier).set(l.$1);
-            Navigator.pop(context);
+            Navigator.pop(dialogContext);
             setState(() {});
           },
           child: Text(l.$2),
@@ -479,7 +479,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: currencies.map((c) => SimpleDialogOption(
           onPressed: () {
             ref.read(currencyProvider.notifier).set(c);
-            Navigator.pop(context);
+            Navigator.pop(dialogContext);
             setState(() {});
           },
           child: Text(c),
@@ -497,7 +497,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Change PIN'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -575,7 +575,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: AlphaStackApp.surfaceDark,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           title: const Text('Signal Alerts'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -636,7 +636,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: AlphaStackApp.surfaceDark,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           title: const Text('Risk Alerts'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -737,7 +737,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Terms of Service'),
         content: const SingleChildScrollView(
           child: Column(
@@ -785,7 +785,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Privacy Policy'),
         content: const SingleChildScrollView(
           child: Column(
@@ -831,7 +831,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         title: const Text('Help & Support'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -903,7 +903,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             'Are you sure you want to disconnect? This will clear all stored API keys and authentication tokens.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(

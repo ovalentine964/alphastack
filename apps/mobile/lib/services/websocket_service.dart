@@ -147,8 +147,6 @@ class WebSocketService {
 
       // Note: We don't set state to "connected" here — we wait for
       // the server's "auth_ok" message in _onMessage to confirm auth.
-      // For now, mark as connected (auth_ok will confirm).
-      _setState(WebSocketState.connected);
       _reconnectAttempts = 0;
 
       _startHeartbeat();
