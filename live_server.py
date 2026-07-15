@@ -2,23 +2,30 @@
 AlphaStack Live Server
 Connects to Binance TESTNET for real market data + virtual trading.
 
-API contract matches what the Flutter mobile app expects.
+Signal generation powered by the 16-step AlphaStack strategy pipeline.
+Falls back to simple heuristics if the pipeline is unavailable.
 """
 
 import asyncio
 import json
 import os
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
+
+# ─── Ensure alphastack package is importable from src/ ─────
+_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 import ccxt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="AlphaStack Live API", version="2.1.0")
+app = FastAPI(title="AlphaStack Live API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,17 +37,14 @@ app.add_middleware(
 
 # ─── Binance Connection ───────────────────────────────────
 
-# Read keys from environment or use defaults
 BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
 
-# Public data (no keys needed) — use production for market data
 exchange_public = ccxt.binance({
     'enableRateLimit': True,
     'options': {'defaultType': 'spot'},
 })
 
-# Testnet for trading
 exchange_testnet = None
 if BINANCE_API_KEY and BINANCE_API_SECRET:
     exchange_testnet = ccxt.binance({
@@ -56,7 +60,6 @@ POSITIONS = []
 TRADES = []
 SIGNALS = []
 
-# Simple token store (for demo — not production-grade JWT)
 _ACTIVE_TOKENS = {}
 
 
@@ -67,6 +70,232 @@ def _generate_token():
         "created": time.time(),
     }
     return token
+
+
+# ─── Pipeline Integration ─────────────────────────────────
+
+_PIPELINE_AVAILABLE = False
+try:
+    from alphastack.strategy.context import AlphaStackContext, Direction
+    from alphastack.strategy.pipeline import AlphaStackPipeline
+    # Monkey-patch: s10_confluence references _WEIGHTS but only defines _DEFAULT_WEIGHTS
+    import alphastack.strategy.steps.s10_confluence as _s10
+    if not hasattr(_s10, '_WEIGHTS'):
+        _s10._WEIGHTS = _s10._DEFAULT_WEIGHTS
+    _PIPELINE_AVAILABLE = True
+except ImportError:
+    pass
+
+# Cache for pipeline signals (avoids re-running on every API call)
+_SIGNAL_CACHE: dict[str, Any] = {"signals": [], "ts": 0.0}
+_SIGNAL_TTL = 60  # seconds — refresh signals at most once per minute
+
+
+def _compute_atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
+    """Compute Average True Range."""
+    if len(closes) < period + 1:
+        return 0.0
+    trs: list[float] = []
+    for i in range(1, len(closes)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        trs.append(tr)
+    if len(trs) < period:
+        return sum(trs) / len(trs) if trs else 0.0
+    # Wilder smoothing
+    atr = sum(trs[:period]) / period
+    for i in range(period, len(trs)):
+        atr = (atr * (period - 1) + trs[i]) / period
+    return atr
+
+
+def _fetch_ohlcv(symbol: str, timeframe: str = "1h", limit: int = 200) -> list[list]:
+    """Fetch OHLCV candles from Binance. Returns list of [ts, o, h, l, c, v]."""
+    return exchange_public.fetch_ohlcv(symbol, timeframe, limit=limit)
+
+
+def _build_market_data(symbol: str) -> dict[str, Any]:
+    """Fetch real market data from Binance and format it for the pipeline.
+
+    Returns a dict matching what AlphaStackContext.market_data expects.
+    """
+    # ── Fetch multi-timeframe OHLCV ──
+    candles_1h = _fetch_ohlcv(symbol, "1h", 200)
+    candles_4h = _fetch_ohlcv(symbol, "4h", 100)
+    candles_1d = _fetch_ohlcv(symbol, "1d", 60)
+
+    def _extract(candles: list[list]) -> tuple[list[float], list[float], list[float], list[float], list[float]]:
+        opens = [c[1] for c in candles]
+        highs = [c[2] for c in candles]
+        lows = [c[3] for c in candles]
+        closes = [c[4] for c in candles]
+        volumes = [c[5] for c in candles]
+        return opens, highs, lows, closes, volumes
+
+    opens, highs, lows, closes, volumes = _extract(candles_1h)
+    _, h4_highs, h4_lows, h4_closes, _ = _extract(candles_4h)
+    _, d_highs, d_lows, d_closes, _ = _extract(candles_1d)
+
+    current_price = closes[-1] if closes else 0.0
+
+    # ── ATR (14-period on 1H) ──
+    atr = _compute_atr(highs, lows, closes, 14)
+
+    # ── pip_size: for crypto quoted in USD, 1 pip = $1 ──
+    pip_size = 1.0
+
+    # ── Fetch order book for spread estimation ──
+    spread_pips = 1.0  # default
+    try:
+        ob = exchange_public.fetch_order_book(symbol, 5)
+        if ob['bids'] and ob['asks']:
+            spread_pips = (ob['asks'][0][0] - ob['bids'][0][0]) / pip_size
+    except Exception:
+        pass
+
+    # ── Fetch ticker for 24h data ──
+    ticker = {}
+    try:
+        ticker = exchange_public.fetch_ticker(symbol)
+    except Exception:
+        pass
+
+    # ── Higher-timeframe closes for bias step ──
+    # Combine 4H and 1D into a "higher timeframe" series
+    htf_closes = d_closes[-50:] if len(d_closes) >= 50 else d_closes
+
+    # ── Build market_data dict ──
+    market_data: dict[str, Any] = {
+        # OHLCV arrays (1H primary)
+        "opens": opens,
+        "highs": highs,
+        "lows": lows,
+        "closes": closes,
+        "volumes": volumes,
+        "close": current_price,
+
+        # Multi-timeframe closes for step 2 (bias)
+        "timeframe_closes": {
+            "1h": closes[-50:],
+            "4h": h4_closes[-50:],
+            "1d": d_closes[-50:],
+        },
+        "htf_closes": htf_closes,
+
+        # Derived metrics
+        "atr_pips": round(atr / pip_size, 2),
+        "pip_size": pip_size,
+        "spread_pips": round(spread_pips, 2),
+        "pip_value": 1.0,  # for crypto, 1 pip = $1 per unit
+
+        # Fundamental / news (simplified — no news API in demo)
+        "news_sentiment": 0.0,
+        "high_impact_events": [],
+        "volatility_index": 0.0,
+
+        # Sizing
+        "account_balance": 10_000.0,
+        "risk_pct": 1.0,
+
+        # RSI
+        "rsi_period": 14,
+
+        # Take-profit R:R targets
+        "rr_multipliers": [1.5, 2.5, 4.0],
+    }
+
+    return market_data
+
+
+async def _run_pipeline(symbol: str) -> dict[str, Any]:
+    """Run the 16-step AlphaStack pipeline and return a signal dict.
+
+    Returns an empty dict if no actionable signal is generated.
+    """
+    if not _PIPELINE_AVAILABLE:
+        return {}
+
+    try:
+        market_data = _build_market_data(symbol)
+        current_price = market_data["close"]
+
+        ctx = AlphaStackContext(
+            symbol=symbol,
+            timeframe="1H",
+            market_data=market_data,
+        )
+
+        pipeline = AlphaStackPipeline(parallel=False)
+        ctx = await pipeline.run(ctx)
+
+        # Only emit a signal if the pipeline produced a direction
+        direction = ctx.confluence.direction
+        if direction == Direction.NONE:
+            return {}
+
+        dir_str = direction.value  # "long" or "short"
+
+        # Build reason from component scores
+        comp = ctx.confluence.component_scores
+        reasons: list[str] = []
+        reasons.append(f"Confluence {ctx.confluence.score:.0f}/100")
+        if ctx.bias.bias.value != "neutral":
+            reasons.append(f"Bias: {ctx.bias.bias.value}")
+        if ctx.structure.structure_type.value != "consolidation":
+            reasons.append(f"Structure: {ctx.structure.structure_type.value}")
+        if ctx.rsi.signal != "neutral":
+            reasons.append(f"RSI: {ctx.rsi.value:.0f} ({ctx.rsi.signal})")
+        if ctx.rsi.divergence != "none":
+            reasons.append(f"RSI div: {ctx.rsi.divergence}")
+        for p in ctx.candlestick.patterns:
+            reasons.append(f"Pattern: {p.name}")
+        reason_str = " | ".join(reasons)
+
+        # Determine strength label
+        score = ctx.confluence.score
+        if score >= 70:
+            strength = "strong"
+        elif score >= 50:
+            strength = "moderate"
+        else:
+            strength = "weak"
+
+        signal: dict[str, Any] = {
+            "id": f"sig-{symbol.replace('/', '-')}-pipeline",
+            "symbol": symbol,
+            "direction": dir_str,
+            "strength": strength,
+            "strategy_id": "alphastack_pipeline",
+            "confidence": round(min(score / 100, 0.99), 2),
+            "entry_price": round(current_price, 2),
+            "stop_loss": round(ctx.stop_loss.price, 2) if ctx.stop_loss.price else None,
+            "take_profit": [round(tp, 2) for tp in ctx.take_profit.levels] if ctx.take_profit.levels else None,
+            "risk_reward": ctx.take_profit.rr_ratio,
+            "confluence_score": round(score, 1),
+            "reason": reason_str,
+            "created_at": datetime.now().isoformat(),
+            "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
+            "is_active": True,
+            # Extra pipeline detail
+            "component_scores": {k: round(v, 3) for k, v in comp.items()},
+            "session": ctx.session.active.value,
+            "structure": ctx.structure.structure_type.value,
+            "rsi": round(ctx.rsi.value, 1),
+            "patterns": [p.name for p in ctx.candlestick.patterns],
+            "journal_tags": ctx.journal.tags,
+        }
+        return signal
+
+    except Exception as e:
+        # Pipeline error — log and fall through to simple fallback
+        import logging
+        logging.getLogger("alphastack.live").warning(
+            "Pipeline failed for %s: %s", symbol, e, exc_info=True,
+        )
+        return {}
 
 
 # ─── Market Data ───────────────────────────────────────────
@@ -118,7 +347,6 @@ async def login(req: LoginRequest):
     """Authenticate — matches what Flutter ApiService.authenticate() expects."""
     global exchange_testnet
 
-    # Try to set up testnet with provided keys
     api_key = req.apiKey or req.username
     api_secret = req.apiSecret or req.password
 
@@ -140,7 +368,7 @@ async def login(req: LoginRequest):
     return {
         "access_token": token,
         "refresh_token": refresh_token,
-        "token": token,  # backward compat
+        "token": token,
         "user": {
             "id": "user-001",
             "username": "trader",
@@ -262,9 +490,7 @@ class OrderRequest(BaseModel):
 
 @app.get("/api/v1/trades")
 async def get_trades(page: int = 1, limit: int = 50, page_size: int = 50):
-    """Trade history — matches Flutter ApiService.getTrades().
-    Returns {trades: [...]} format.
-    """
+    """Trade history — matches Flutter ApiService.getTrades()."""
     actual_limit = min(limit, page_size)
     return {"trades": TRADES[-actual_limit:]}
 
@@ -371,44 +597,76 @@ async def market_candles(symbol: str, timeframe: str = "1h", limit: int = 100):
 
 # ─── Signals ───────────────────────────────────────────────
 
-async def _generate_signals():
-    """Generate signals from live market data."""
-    signals = []
+def _simple_fallback_signal(symbol: str) -> dict[str, Any]:
+    """Simple heuristic signal when pipeline is unavailable."""
     try:
-        for sym in ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']:
-            ticker = await get_ticker(sym)
-            price = ticker.get('price', 0)
-            change = ticker.get('change_24h', 0)
-
-            direction = "long" if change > 0 else "short"
-            strength = "strong" if abs(change) > 3 else "moderate" if abs(change) > 1 else "weak"
-
-            signals.append({
-                "id": f"sig-{sym.replace('/', '-')}",
-                "symbol": sym,
-                "direction": direction,
-                "strength": strength,
-                "strategy_id": "live_analysis",
-                "confidence": min(0.95, 0.5 + abs(change) / 10),
-                "entry_price": price,
-                "stop_loss": price * (0.97 if direction == "long" else 1.03),
-                "take_profit": price * (1.05 if direction == "long" else 0.95),
-                "risk_reward": 1.67,
-                "reason": f"24h change: {change:.2f}%, price: ${price:,.2f}",
-                "created_at": datetime.now().isoformat(),
-                "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
-                "is_active": True,
-            })
+        ticker = exchange_public.fetch_ticker(symbol)
+        price = ticker['last']
+        change = ticker.get('percentage', 0)
     except Exception:
-        pass
+        return {}
+
+    direction = "long" if change > 0 else "short"
+    strength = "strong" if abs(change) > 3 else "moderate" if abs(change) > 1 else "weak"
+
+    return {
+        "id": f"sig-{symbol.replace('/', '-')}",
+        "symbol": symbol,
+        "direction": direction,
+        "strength": strength,
+        "strategy_id": "simple_heuristic",
+        "confidence": round(min(0.95, 0.5 + abs(change) / 10), 2),
+        "entry_price": price,
+        "stop_loss": round(price * (0.97 if direction == "long" else 1.03), 2),
+        "take_profit": [round(price * (1.05 if direction == "long" else 0.95), 2)],
+        "risk_reward": 1.67,
+        "reason": f"24h change: {change:.2f}%, price: ${price:,.2f}",
+        "created_at": datetime.now().isoformat(),
+        "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
+        "is_active": True,
+    }
+
+
+async def _generate_signals() -> list[dict[str, Any]]:
+    """Generate signals using the AlphaStack pipeline, with fallback."""
+    now = time.time()
+
+    # Return cached signals if fresh enough
+    if now - _SIGNAL_CACHE["ts"] < _SIGNAL_TTL and _SIGNAL_CACHE["signals"]:
+        return _SIGNAL_CACHE["signals"]
+
+    symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+    signals: list[dict[str, Any]] = []
+
+    if _PIPELINE_AVAILABLE:
+        # Run pipeline for each symbol
+        for sym in symbols:
+            try:
+                sig = await _run_pipeline(sym)
+                if sig:
+                    signals.append(sig)
+            except Exception:
+                # Pipeline error for this symbol — try simple fallback
+                fb = _simple_fallback_signal(sym)
+                if fb:
+                    signals.append(fb)
+    else:
+        # Pipeline not available — use simple heuristics
+        for sym in symbols:
+            fb = _simple_fallback_signal(sym)
+            if fb:
+                signals.append(fb)
+
+    # Cache results
+    _SIGNAL_CACHE["signals"] = signals
+    _SIGNAL_CACHE["ts"] = now
+
     return signals
 
 
 @app.get("/api/v1/signals")
 async def get_signals(page: int = 1, limit: int = 50, page_size: int = 50):
-    """Active signals — matches Flutter ApiService.getActiveSignals().
-    Returns {signals: [...]} format.
-    """
+    """Active signals — matches Flutter ApiService.getActiveSignals()."""
     signals = await _generate_signals()
     return {"signals": signals}
 
@@ -421,9 +679,7 @@ async def active_signals():
 
 @app.get("/api/v1/signals/history")
 async def signals_history(page: int = 1, limit: int = 50, page_size: int = 50):
-    """Signal history — matches Flutter ApiService.getSignals().
-    Returns {signals: [...]} format.
-    """
+    """Signal history — matches Flutter ApiService.getSignals()."""
     signals = await _generate_signals()
     return {"signals": signals}
 
@@ -517,6 +773,7 @@ async def health():
         "binance_connected": binance_ok,
         "btc_price": btc_price,
         "testnet_configured": exchange_testnet is not None,
+        "pipeline_available": _PIPELINE_AVAILABLE,
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -559,4 +816,5 @@ if __name__ == "__main__":
     print("🚀 AlphaStack LIVE Server starting...")
     print("📡 Connected to Binance for real market data")
     print("💰 Trading mode: TESTNET (virtual money, real prices)")
+    print(f"🧠 Pipeline: {'✅ 16-step AlphaStack' if _PIPELINE_AVAILABLE else '⚠️ Simple heuristic fallback'}")
     uvicorn.run(app, host="0.0.0.0", port=8000)
