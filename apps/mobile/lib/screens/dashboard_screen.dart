@@ -540,7 +540,7 @@ class _ConnectionDot extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(connectionStatusProvider);
-    Color color;
+    Color color = AlphaStackApp.textSecondary;
     switch (status) {
       case ConnectionStatus.connected:
         color = AlphaStackApp.accentGreen;
