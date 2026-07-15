@@ -22,10 +22,10 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0.0'
 }
 
-def keystoreFilePath = System.getenv("KEYSTORE_PATH") ?: ""
-def keystorePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-def keyAlias = System.getenv("KEY_ALIAS") ?: ""
-def keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+def ksPath = System.getenv("KEYSTORE_PATH") ?: ""
+def ksPass = System.getenv("KEYSTORE_PASSWORD") ?: ""
+def ksAlias = System.getenv("KEY_ALIAS") ?: ""
+def ksKeyPass = System.getenv("KEY_PASSWORD") ?: ""
 
 android {
     namespace "com.alphastack.mobile"
@@ -55,18 +55,18 @@ android {
 
     signingConfigs {
         release {
-            if (keystoreFilePath && !keystoreFilePath.isEmpty() && keystorePassword && !keystorePassword.isEmpty()) {
-                storeFile file(keystoreFilePath)
-                storePassword keystorePassword
-                keyAlias keyAlias
-                keyPassword keyPassword
+            if (ksPath && ksPass) {
+                storeFile file(ksPath)
+                storePassword ksPass
+                keyAlias ksAlias
+                keyPassword ksKeyPass
             }
         }
     }
 
     buildTypes {
         release {
-            if (keystoreFilePath && !keystoreFilePath.isEmpty() && keystorePassword && !keystorePassword.isEmpty()) {
+            if (ksPath && ksPass) {
                 signingConfig signingConfigs.release
             } else {
                 signingConfig signingConfigs.debug
