@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
+import '../providers/connection_status.dart';
 import '../widgets/portfolio_card.dart';
 import '../widgets/position_tile.dart';
 import '../widgets/signal_card.dart';
@@ -150,6 +151,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           const _WsConnectionIndicator(),
           // Offline indicator
           const _OfflineIndicator(),
+          // Connection status dot
+          const _ConnectionDot(),
           const SizedBox(width: 4),
           const _NotificationButton(),
           _RefreshButton(),
@@ -167,6 +170,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // Connection status banner
+            const _ConnectionBanner(),
             // Offline banner
             if (ApiService().isOffline) _buildOfflineBanner(),
 

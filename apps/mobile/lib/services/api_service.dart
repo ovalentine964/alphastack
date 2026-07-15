@@ -45,7 +45,7 @@ class ApiService {
   static const String _binanceApiSecret = 'binance_api_secret';
   static const String _mimoApiKey = 'mimo_api_key';
   static const String _isTestnetKey = 'is_testnet';
-  static const String _defaultBaseUrl = 'http://localhost:8000/api/v1';
+  static const String defaultBaseUrl = 'http://localhost:8000/api/v1';
 
   // Retry / timeout config
   static const int _maxRetries = 3;
@@ -83,7 +83,7 @@ class ApiService {
   // ── Base URL ───────────────────────────────────────────────────────
 
   Future<String> get baseUrl async {
-    _baseUrl ??= await _storage.read(key: _baseUrlKey) ?? _defaultBaseUrl;
+    _baseUrl ??= await _storage.read(key: _baseUrlKey) ?? defaultBaseUrl;
     return _baseUrl!;
   }
 
@@ -500,6 +500,24 @@ class ApiService {
       await setRefreshToken(refreshToken);
     }
     return data as Map<String, dynamic>;
+  }
+
+  /// Auto-authenticate using stored keys, or demo credentials if none stored.
+  /// Returns true if authentication succeeded.
+  Future<bool> autoAuthenticate() async {
+    try {
+      final apiKey = await getBinanceApiKey();
+      final apiSecret = await getBinanceApiSecret();
+
+      await authenticate(
+        apiKey: apiKey ?? 'demo',
+        apiSecret: apiSecret ?? 'demo',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('Auto-authenticate failed: $e');
+      return false;
+    }
   }
 
   // ─── Health ──────────────────────────────────────────────────────
