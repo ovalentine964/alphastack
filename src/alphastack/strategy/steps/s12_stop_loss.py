@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from alphastack.strategy.context import AlphaStackContext, Direction, StopLoss
 from alphastack.strategy.steps.base import AlphaStackStep
+from alphastack.strategy.config import strategy_params
 
 
 class StopLossStep(AlphaStackStep):
@@ -20,8 +21,14 @@ class StopLossStep(AlphaStackStep):
         current_price: float = md.get("close", 0.0)
         pip_size: float = md.get("pip_size", 0.0001)
         atr_pips: float = md.get("atr_pips", 50.0)
-        atr_multiplier: float = md.get("stop_atr_multiplier", 1.5)
-        buffer_pips: float = md.get("stop_buffer_pips", 5.0)
+        atr_multiplier: float = md.get(
+            "stop_atr_multiplier",
+            strategy_params.get("stop_loss.atr_multiplier", 1.5),
+        )
+        buffer_pips: float = md.get(
+            "stop_buffer_pips",
+            strategy_params.get("stop_loss.buffer_pips", 5.0),
+        )
 
         # --- Method 1: Structure-based stop ---
         structure_stop = self._structure_based_stop(context, direction, current_price, pip_size, buffer_pips)
@@ -59,17 +66,33 @@ class StopLossStep(AlphaStackStep):
         pip_size: float,
         buffer_pips: float,
     ) -> float:
-        """Place stop beyond the nearest swing point."""
+        """Place stop beyond the nearest swing point.
+
+        For LONG: nearest swing low *below* entry (not the absolute min).
+        For SHORT: nearest swing high *above* entry (not the absolute max).
+        This prevents stops from being placed excessively far away.
+        """
         buffer = buffer_pips * pip_size
 
         if direction == Direction.LONG:
             swing_lows = context.structure.swing_lows
-            if swing_lows:
-                return min(swing_lows) - buffer
-            # Fallback: 50 pips below
-            return current_price - 50 * pip_size
+            # Filter to swing lows strictly below current price, pick the nearest
+            candidates = [sl for sl in swing_lows if sl < current_price]
+            if candidates:
+                nearest = max(candidates)  # highest of the lows below price
+                return nearest - buffer
+            # Fallback: ATR-based distance (1.5 × ATR)
+            atr_pips: float = context.market_data.get("atr_pips", 50.0)
+            fallback_mult = strategy_params.get("stop_loss.fallback_atr_multiplier", 1.5)
+            return current_price - atr_pips * fallback_mult * pip_size
         else:
             swing_highs = context.structure.swing_highs
-            if swing_highs:
-                return max(swing_highs) + buffer
-            return current_price + 50 * pip_size
+            # Filter to swing highs strictly above current price, pick the nearest
+            candidates = [sh for sh in swing_highs if sh > current_price]
+            if candidates:
+                nearest = min(candidates)  # lowest of the highs above price
+                return nearest + buffer
+            # Fallback: ATR-based distance
+            atr_pips: float = context.market_data.get("atr_pips", 50.0)
+            fallback_mult = strategy_params.get("stop_loss.fallback_atr_multiplier", 1.5)
+            return current_price + atr_pips * fallback_mult * pip_size

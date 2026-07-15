@@ -9,6 +9,7 @@ on:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
+  RUST_TOOLCHAIN: stable
 
 jobs:
   # ─── Python: lint + type-check + test ────────────────────────────
@@ -38,7 +39,7 @@ jobs:
 
       - name: Type check with mypy
         run: |
-          mypy src/alphastack/ --ignore-missing-imports --no-error-summary || true
+          mypy src/alphastack/ --ignore-missing-imports
 
       - name: Run tests with pytest
         run: |
@@ -59,12 +60,53 @@ jobs:
           name: python-coverage
           path: coverage.xml
 
-  # ─── TypeScript: lint + build (web/mobile/desktop) ───────────────
+  # ─── Rust core: build + test ─────────────────────────────────────
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/rust_core/target/
+            ~/.cargo/registry/
+            ~/.cargo/git/
+          key: rust-${{ runner.os }}-${{ hashFiles('src/rust_core/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Install maturin
+        run: pip install maturin>=1.4.0
+
+      - name: Build Rust extension
+        working-directory: src/rust_core
+        run: maturin develop --release
+
+      - name: Test Rust import
+        run: |
+          python -c "import alphastack_rust_core; print('✅ Rust core loaded:', dir(alphastack_rust_core))"
+
+      - name: Run Rust tests
+        working-directory: src/rust_core
+        run: cargo test --release
+
+  # ─── TypeScript: lint + build (web + desktop) ────────────────────
   typescript:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [web, mobile, desktop]
+        app: [web, desktop]
 
     steps:
       - uses: actions/checkout@v4
@@ -74,34 +116,47 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
 
       - name: Install dependencies
-        run: |
-          if [ -d "${{ matrix.app }}" ]; then
-            cd ${{ matrix.app }}
-            npm ci
-          else
-            echo "No ${{ matrix.app }} directory, skipping"
-          fi
+        working-directory: apps/${{ matrix.app }}
+        run: npm ci
 
       - name: Lint
-        run: |
-          if [ -d "${{ matrix.app }}" ]; then
-            cd ${{ matrix.app }}
-            npm run lint --if-present
-          fi
+        working-directory: apps/${{ matrix.app }}
+        run: npm run lint --if-present
 
       - name: Build
-        run: |
-          if [ -d "${{ matrix.app }}" ]; then
-            cd ${{ matrix.app }}
-            npm run build --if-present
-          fi
+        working-directory: apps/${{ matrix.app }}
+        run: npm run build
+
+  # ─── Flutter (mobile): build ─────────────────────────────────────
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.24.0
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: apps/mobile
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build APK
+        working-directory: apps/mobile
+        run: flutter build apk --debug
 
   # ─── Docker build test ───────────────────────────────────────────
   docker:
     runs-on: ubuntu-latest
-    needs: [python]
+    needs: [python, rust]
 
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +168,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: infra/docker/Dockerfile
           push: false
           tags: alphastack:test
           cache-from: type=gha

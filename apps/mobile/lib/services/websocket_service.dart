@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-enum WebSocketState { disconnected, connecting, connected, error }
+enum WebSocketState { disconnected, connecting, connected, error, reconnecting }
 
 class WebSocketMessage {
   final String type;
@@ -18,13 +18,38 @@ class WebSocketMessage {
   }) : timestamp = timestamp ?? DateTime.now();
 
   factory WebSocketMessage.fromJson(Map<String, dynamic> json) {
-    return WebSocketMessage(
-      type: json['type'] as String? ?? 'unknown',
-      data: json['data'] as Map<String, dynamic>? ?? {},
-      timestamp: json['timestamp'] != null
-          ? DateTime.parse(json['timestamp'] as String)
-          : DateTime.now(),
-    );
+    // Server uses two shapes:
+    //   Control messages: {"type": "auth_ok", "user_id": "..."}
+    //                     {"type": "pong", "ts": ...}
+    //                     {"type": "heartbeat", "ts": ...}
+    //   Broadcast messages: {"channel": "prices", "data": {...}, "ts": ...}
+    //
+    // Normalise both into (type, data).
+    final String type;
+    final Map<String, dynamic> data;
+
+    if (json.containsKey('channel') && json.containsKey('data')) {
+      // Broadcast message — use channel name as type
+      type = json['channel'] as String;
+      data = json['data'] as Map<String, dynamic>? ?? {};
+    } else {
+      type = json['type'] as String? ?? 'unknown';
+      data = json['data'] as Map<String, dynamic>? ?? {};
+    }
+
+    DateTime ts;
+    if (json['ts'] != null) {
+      final raw = json['ts'];
+      ts = raw is num
+          ? DateTime.fromMillisecondsSinceEpoch((raw * 1000).toInt())
+          : DateTime.tryParse(raw.toString()) ?? DateTime.now();
+    } else if (json['timestamp'] != null) {
+      ts = DateTime.tryParse(json['timestamp'].toString()) ?? DateTime.now();
+    } else {
+      ts = DateTime.now();
+    }
+
+    return WebSocketMessage(type: type, data: data, timestamp: ts);
   }
 }
 
@@ -40,24 +65,37 @@ class WebSocketService {
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 10;
-  static const Duration _heartbeatInterval = Duration(seconds: 30);
+  static const Duration _heartbeatInterval = Duration(seconds: 25);
   static const Duration _reconnectBaseDelay = Duration(seconds: 2);
+  bool _disposed = false;
 
   // Stream controllers
   final _stateController = StreamController<WebSocketState>.broadcast();
   final _messageController = StreamController<WebSocketMessage>.broadcast();
-  final _positionUpdateController = StreamController<Map<String, dynamic>>.broadcast();
-  final _signalUpdateController = StreamController<Map<String, dynamic>>.broadcast();
-  final _tradeUpdateController = StreamController<Map<String, dynamic>>.broadcast();
-  final _portfolioUpdateController = StreamController<Map<String, dynamic>>.broadcast();
+  final _positionUpdateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _signalUpdateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _tradeUpdateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _portfolioUpdateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _priceUpdateController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   // Public streams
   Stream<WebSocketState> get stateStream => _stateController.stream;
   Stream<WebSocketMessage> get messageStream => _messageController.stream;
-  Stream<Map<String, dynamic>> get positionUpdates => _positionUpdateController.stream;
-  Stream<Map<String, dynamic>> get signalUpdates => _signalUpdateController.stream;
-  Stream<Map<String, dynamic>> get tradeUpdates => _tradeUpdateController.stream;
-  Stream<Map<String, dynamic>> get portfolioUpdates => _portfolioUpdateController.stream;
+  Stream<Map<String, dynamic>> get positionUpdates =>
+      _positionUpdateController.stream;
+  Stream<Map<String, dynamic>> get signalUpdates =>
+      _signalUpdateController.stream;
+  Stream<Map<String, dynamic>> get tradeUpdates =>
+      _tradeUpdateController.stream;
+  Stream<Map<String, dynamic>> get portfolioUpdates =>
+      _portfolioUpdateController.stream;
+  Stream<Map<String, dynamic>> get priceUpdates =>
+      _priceUpdateController.stream;
 
   WebSocketState get state => _state;
   bool get isConnected => _state == WebSocketState.connected;
@@ -67,8 +105,16 @@ class WebSocketService {
   factory WebSocketService() => _instance;
   WebSocketService._internal();
 
+  /// Connect to the WebSocket server.
+  ///
+  /// The server expects:
+  /// 1. TCP/WebSocket connection
+  /// 2. First message within 10s: {"type": "auth", "token": "<jwt>"}
+  /// 3. Server responds: {"type": "auth_ok", ...} or {"type": "auth_error", ...}
+  /// 4. Then subscribe to channels
   Future<void> connect() async {
-    if (_state == WebSocketState.connected || _state == WebSocketState.connecting) {
+    if (_state == WebSocketState.connected ||
+        _state == WebSocketState.connecting) {
       return;
     }
 
@@ -76,25 +122,34 @@ class WebSocketService {
 
     try {
       String wsUrl = await _storage.read(key: _wsUrlKey) ?? _defaultWsUrl;
-      final authToken = await _storage.read(key: 'auth_token');
-
-      if (authToken != null) {
-        final separator = wsUrl.contains('?') ? '&' : '?';
-        wsUrl = '${wsUrl}${separator}token=$authToken';
-      }
 
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
+      // Wait for the WebSocket to be ready
       await _channel!.ready;
 
-      _setState(WebSocketState.connected);
-      _reconnectAttempts = 0;
+      // The server requires auth as the FIRST message within 10 seconds.
+      // Send it immediately after connection is established.
+      final authToken = await _storage.read(key: 'auth_token');
+      if (authToken != null) {
+        _send({'type': 'auth', 'token': authToken});
+      } else {
+        debugPrint('WebSocket: No auth token available — sending anonymous auth');
+        _send({'type': 'auth', 'token': ''});
+      }
 
+      // Listen for messages
       _channel!.stream.listen(
         _onMessage,
         onError: _onError,
         onDone: _onDone,
       );
+
+      // Note: We don't set state to "connected" here — we wait for
+      // the server's "auth_ok" message in _onMessage to confirm auth.
+      // For now, mark as connected (auth_ok will confirm).
+      _setState(WebSocketState.connected);
+      _reconnectAttempts = 0;
 
       _startHeartbeat();
     } catch (e) {
@@ -120,28 +175,59 @@ class WebSocketService {
 
       _messageController.add(message);
 
-      // Route to specific streams
+      // Route to specific streams based on channel/type
       switch (message.type) {
-        case 'position_update':
-        case 'position_opened':
-        case 'position_closed':
-          _positionUpdateController.add(message.data);
+        // ── Auth responses ───────────────────────────────────
+        case 'auth_ok':
+          debugPrint('WebSocket authenticated: user=${message.data['user_id']}');
+          _setState(WebSocketState.connected);
+          // Auto-subscribe to all channels after successful auth
+          subscribeAll(['prices', 'trades', 'signals', 'system']);
           break;
-        case 'signal_new':
-        case 'signal_update':
-        case 'signal_expired':
-          _signalUpdateController.add(message.data);
+
+        case 'auth_error':
+          debugPrint('WebSocket auth error: ${message.data['detail']}');
+          _setState(WebSocketState.error);
+          // Don't auto-reconnect on auth error — user needs to fix credentials
           break;
-        case 'trade_executed':
-        case 'trade_updated':
-          _tradeUpdateController.add(message.data);
-          break;
-        case 'portfolio_update':
+
+        // ── Broadcast channels (server → client) ─────────────
+        case 'prices':
+          _priceUpdateController.add(message.data);
           _portfolioUpdateController.add(message.data);
           break;
-        case 'pong':
-          // Heartbeat response, ignore
+        case 'trades':
+          _tradeUpdateController.add(message.data);
           break;
+        case 'signals':
+          _signalUpdateController.add(message.data);
+          break;
+        case 'system':
+          debugPrint('System: ${message.data}');
+          break;
+
+        // ── Control messages ─────────────────────────────────
+        case 'subscribed':
+          debugPrint('WS subscribed: ${message.data}');
+          break;
+        case 'unsubscribed':
+          debugPrint('WS unsubscribed: ${message.data}');
+          break;
+
+        // ── Server heartbeat → respond with pong ─────────────
+        case 'heartbeat':
+          // Server sends periodic heartbeats; respond to keep connection alive
+          _send({'type': 'pong'});
+          break;
+
+        case 'pong':
+          // Response to our ping — connection is alive
+          break;
+
+        case 'error':
+          debugPrint('WS server error: ${message.data}');
+          break;
+
         default:
           debugPrint('Unknown WS message type: ${message.type}');
       }
@@ -159,7 +245,7 @@ class WebSocketService {
   void _onDone() {
     debugPrint('WebSocket closed');
     _heartbeatTimer?.cancel();
-    if (_state != WebSocketState.disconnected) {
+    if (_state != WebSocketState.disconnected && !_disposed) {
       _setState(WebSocketState.disconnected);
       _scheduleReconnect();
     }
@@ -168,43 +254,69 @@ class WebSocketService {
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
-      send({'type': 'ping'});
+      if (_state == WebSocketState.connected) {
+        _send({'type': 'ping'});
+      }
     });
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      debugPrint('Max reconnect attempts reached');
+    if (_reconnectAttempts >= _maxReconnectAttempts || _disposed) {
+      debugPrint('Max reconnect attempts reached or disposed');
       return;
     }
 
-    final delay = _reconnectBaseDelay * (1 << _reconnectAttempts);
+    // Cap the delay at 60 seconds
+    final delaySec =
+        (_reconnectBaseDelay.inSeconds * (1 << _reconnectAttempts))
+            .clamp(2, 60);
+    final delay = Duration(seconds: delaySec);
     _reconnectAttempts++;
 
-    debugPrint('Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
-    _reconnectTimer = Timer(delay, connect);
+    _setState(WebSocketState.reconnecting);
+    debugPrint(
+        'Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
+    _reconnectTimer = Timer(delay, () {
+      if (!_disposed) connect();
+    });
   }
 
+  /// Send a raw JSON message. Only sends if connected.
   void send(Map<String, dynamic> message) {
     if (_channel != null && _state == WebSocketState.connected) {
-      _channel!.sink.add(jsonEncode(message));
+      _send(message);
+    }
+  }
+
+  /// Internal send that doesn't check state (used for auth handshake).
+  void _send(Map<String, dynamic> message) {
+    try {
+      _channel?.sink.add(jsonEncode(message));
+    } catch (e) {
+      debugPrint('WebSocket send error: $e');
     }
   }
 
   void subscribe(String channel) {
-    send({'type': 'subscribe', 'channel': channel});
+    send({'type': 'subscribe', 'channels': [channel]});
+  }
+
+  void subscribeAll(List<String> channels) {
+    send({'type': 'subscribe', 'channels': channels});
   }
 
   void unsubscribe(String channel) {
-    send({'type': 'unsubscribe', 'channel': channel});
+    send({'type': 'unsubscribe', 'channels': [channel]});
   }
 
   void _setState(WebSocketState newState) {
+    if (_state == newState) return;
     _state = newState;
     _stateController.add(newState);
   }
 
   void dispose() {
+    _disposed = true;
     disconnect();
     _stateController.close();
     _messageController.close();
@@ -212,5 +324,6 @@ class WebSocketService {
     _signalUpdateController.close();
     _tradeUpdateController.close();
     _portfolioUpdateController.close();
+    _priceUpdateController.close();
   }
 }

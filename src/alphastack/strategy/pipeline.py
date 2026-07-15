@@ -49,6 +49,9 @@ class AlphaStackPipeline:
         self._listeners: list[PipelineEvent] = []
 
         # Ordered step instances
+        # NOTE: Stop loss (old step 12) runs BEFORE position sizing (old step 11)
+        # so that sizing can use the actual computed stop price, not an estimate.
+        # Step numbers kept as labels; execution order is this list.
         self._steps: list[AlphaStackStep] = [
             FundamentalIntelligence(),   # 01
             MarketBiasStep(),            # 02
@@ -60,8 +63,8 @@ class AlphaStackPipeline:
             RSIConfirmation(),           # 08  ─┤
             CandlestickConfirmation(),   # 09  ─┘
             ConfluenceEngine(),          # 10
-            PositionSizingStep(),        # 11
-            StopLossStep(),              # 12
+            StopLossStep(),              # 12 → runs first to compute actual stop
+            PositionSizingStep(),        # 11 → uses actual stop from step 12
             TakeProfitStep(),            # 13
             TradeManagementStep(),       # 14
             ExitConditions(),            # 15

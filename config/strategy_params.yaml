@@ -1,0 +1,211 @@
+# =============================================================================
+# AlphaStack — Strategy Parameters
+# =============================================================================
+# All tunable strategy parameters in one place.  Steps load from here via
+# StrategyConfig.  Parameters can be overridden per-regime (trending / ranging)
+# by setting the "regime" key in market_data.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Step 01 – Fundamental Intelligence
+# -----------------------------------------------------------------------------
+fundamental:
+  vix_risk_off: 25.0            # VIX above this → risk_off regime
+  vix_mixed: 15.0               # VIX above this → mixed regime
+  bias_threshold: 0.2           # |score| must exceed this for directional bias
+  news_dampen_factor: 0.5       # Conviction multiplier near high-impact events
+
+# -----------------------------------------------------------------------------
+# Step 02 – Market Bias
+# -----------------------------------------------------------------------------
+bias:
+  short_ma_period: 20           # Short-term MA period (was 5)
+  long_ma_period: 50            # Long-term MA period (was 20)
+  htf_short_ma_period: 20       # Higher-TF short MA
+  htf_long_ma_period: 50        # Higher-TF long MA
+  bias_threshold: 0.003         # |score| threshold for directional bias (was 0.001)
+  trend_strength_scale: 50.0    # Multiplier to normalize score to 0-1
+
+# -----------------------------------------------------------------------------
+# Step 03 – Session Analysis
+# -----------------------------------------------------------------------------
+session:
+  # UTC hours for session boundaries
+  london_start: 7
+  london_end: 16
+  ny_start: 12
+  ny_end: 21
+  asian_start: 0
+  asian_end: 8
+  # Volatility multipliers per session
+  volatility:
+    london: 1.0
+    new_york: 0.9
+    london_ny_overlap: 1.2      # Highest vol period
+    asian: 0.6
+    off_hours: 0.3
+
+# -----------------------------------------------------------------------------
+# Step 04 – Market Structure
+# -----------------------------------------------------------------------------
+structure:
+  swing_lookback: 5             # Bars to look back for swing detection (was 3)
+  min_swings_required: 2        # Minimum swing points to classify structure
+  keep_last_n_swings: 5         # How many recent swings to retain
+
+# -----------------------------------------------------------------------------
+# Step 05 – Support / Resistance
+# -----------------------------------------------------------------------------
+sr:
+  bucket_method: "atr_relative" # "fixed" or "atr_relative"
+  fixed_bucket_pips: 50.0       # Used when method = "fixed"
+  atr_bucket_multiplier: 0.5    # bucket = ATR * this (used when method = "atr_relative")
+  min_touches: 2                # Minimum touches to qualify as a level
+  recency_decay: 0.95           # Exponential decay per bar for touch weighting
+
+# -----------------------------------------------------------------------------
+# Step 06 – Liquidity Detection
+# -----------------------------------------------------------------------------
+liquidity:
+  tolerance_pips: 10.0          # Tolerance for equal highs/lows detection
+  tolerance_method: "atr_relative"  # "fixed" or "atr_relative"
+  atr_tolerance_multiplier: 0.2 # tolerance = ATR * this
+
+# -----------------------------------------------------------------------------
+# Step 07 – Smart Money Concepts
+# -----------------------------------------------------------------------------
+smc:
+  max_order_blocks: 5           # Max unmitigated OBs to keep
+  max_fvgs: 5                   # Max unfilled FVGs to keep
+  ob_impulse_threshold: 1.0     # Close must exceed prev high/low by this × ATR
+
+# -----------------------------------------------------------------------------
+# Step 08 – RSI
+# -----------------------------------------------------------------------------
+rsi:
+  period: 14
+  overbought: 70                # Default; overridden per regime
+  oversold: 30                  # Default; overridden per regime
+  divergence_lookback: 10       # Bars for divergence detection (was 5)
+
+# Regime-adaptive RSI thresholds
+  regimes:
+    trending:
+      overbought: 80
+      oversold: 40
+    ranging:
+      overbought: 70
+      oversold: 30
+    risk_off:
+      overbought: 65
+      oversold: 25
+
+# -----------------------------------------------------------------------------
+# Step 09 – Candlestick Patterns
+# -----------------------------------------------------------------------------
+candlestick:
+  lookback_bars: 5              # How many recent bars to scan
+  doji_strength: 0.1            # Doji alone is weak (was 0.3)
+  volume_weight_enabled: false   # Enable volume weighting when volume data available
+
+# -----------------------------------------------------------------------------
+# Step 10 – Confluence Engine
+# -----------------------------------------------------------------------------
+confluence:
+  threshold: 40                 # Minimum score to generate a signal
+  min_agreeing_components: 3    # Minimum components that must vote same direction
+  weights:
+    fundamental: 0.05
+    market_bias: 0.15
+    session: 0.05
+    structure: 0.20
+    sr_levels: 0.10
+    liquidity: 0.10
+    smc: 0.15
+    rsi: 0.10
+    candlestick: 0.10
+
+  # Regime-adaptive weight overrides
+  regimes:
+    trending:
+      structure: 0.25
+      smc: 0.20
+      sr_levels: 0.05
+      rsi: 0.05
+    ranging:
+      structure: 0.10
+      smc: 0.10
+      sr_levels: 0.20
+      rsi: 0.15
+
+# -----------------------------------------------------------------------------
+# Step 11 – Position Sizing
+# -----------------------------------------------------------------------------
+sizing:
+  default_risk_pct: 1.0         # % of account to risk per trade
+  max_risk_pct: 2.0             # Hard cap
+  min_position_size: 0.01       # Micro-lot minimum
+
+# -----------------------------------------------------------------------------
+# Step 12 – Stop Loss
+# -----------------------------------------------------------------------------
+stop_loss:
+  atr_multiplier: 1.5           # ATR-based stop distance
+  buffer_pips: 5.0              # Buffer beyond swing point
+  buffer_method: "atr_relative" # "fixed" or "atr_relative"
+  atr_buffer_multiplier: 0.1    # buffer = ATR * this (when atr_relative)
+  fallback_atr_multiplier: 1.5  # Fallback when no swing available
+
+# -----------------------------------------------------------------------------
+# Step 13 – Take Profit
+# -----------------------------------------------------------------------------
+take_profit:
+  rr_multipliers: [1.5, 2.5, 4.0]   # R:R targets for partial TPs
+  sr_override_enabled: true          # Override TP1 with nearest S/R if closer
+
+# Regime-adaptive TP multipliers
+  regimes:
+    trending:
+      rr_multipliers: [2.0, 3.5, 5.0]   # Wider targets in trends
+    ranging:
+      rr_multipliers: [1.0, 1.5, 2.0]   # Tighter targets in ranges
+
+# -----------------------------------------------------------------------------
+# Step 14 – Trade Management
+# -----------------------------------------------------------------------------
+management:
+  breakeven_at_rr: 1.0          # Move SL to entry after this R:R
+  trail_trigger_rr: 1.5         # Start trailing after this R:R
+  trail_atr_multiplier: 1.0     # Trail distance = ATR * this
+  partial_close_pct: 50         # Close this % at TP1
+
+# Regime-adaptive management
+  regimes:
+    trending:
+      trail_atr_multiplier: 1.5   # Wider trail in trends
+    ranging:
+      trail_atr_multiplier: 0.75  # Tighter trail in ranges
+
+# -----------------------------------------------------------------------------
+# Step 15 – Exit Conditions
+# -----------------------------------------------------------------------------
+exit:
+  max_hold_hours: 48            # Max time to hold a position
+  confluence_exit_threshold: 25  # Exit if confluence drops below this
+  rsi_exit_action: "warning"    # "warning" | "tighten_stop" | "exit"
+
+# Timeframe-adaptive hold time
+  timeframe_hold_hours:
+    "1H": 48
+    "4H": 168     # 1 week
+    "1D": 336     # 2 weeks
+    "15M": 24
+
+# -----------------------------------------------------------------------------
+# Walk-Forward Validation (backtesting)
+# -----------------------------------------------------------------------------
+walk_forward:
+  train_bars: 5000              # Bars for in-sample training
+  test_bars: 1000               # Bars for out-of-sample testing
+  step_bars: 500                # Step size for rolling window
+  min_trades: 30                # Minimum trades per fold for statistical validity

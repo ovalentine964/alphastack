@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/trades_screen.dart';
 import 'screens/signals_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/api_keys_screen.dart';
+import 'services/api_service.dart';
 
 class AlphaStackApp extends StatelessWidget {
   const AlphaStackApp({super.key});
@@ -135,7 +138,142 @@ class AlphaStackApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const MainNavigation(),
+      home: const _AppBootstrap(),
+    );
+  }
+}
+
+/// Bootstrap widget that checks if API keys are configured.
+/// Shows the API keys screen on first launch, then navigates to main app.
+class _AppBootstrap extends StatefulWidget {
+  const _AppBootstrap();
+
+  @override
+  State<_AppBootstrap> createState() => _AppBootstrapState();
+}
+
+class _AppBootstrapState extends State<_AppBootstrap> {
+  bool? _keysConfigured;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkKeys();
+  }
+
+  Future<void> _checkKeys() async {
+    final api = ApiService();
+    final configured = await api.hasStoredKeys();
+    if (mounted) {
+      setState(() => _keysConfigured = configured);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Still loading
+    if (_keysConfigured == null) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: AlphaStackApp.accentBlue),
+        ),
+      );
+    }
+
+    // Keys not configured — show setup screen
+    if (!_keysConfigured!) {
+      return _ApiKeysSetupScreen(
+        onConfigured: () {
+          setState(() => _keysConfigured = true);
+        },
+      );
+    }
+
+    // Keys configured — show main app
+    return const MainNavigation();
+  }
+}
+
+/// Wrapper for the API keys screen during first-launch setup.
+class _ApiKeysSetupScreen extends StatelessWidget {
+  final VoidCallback onConfigured;
+
+  const _ApiKeysSetupScreen({required this.onConfigured});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AlphaStackApp.accentBlue, AlphaStackApp.accentGreen],
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.auto_graph_rounded,
+                  size: 20, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            const Text('Welcome to AlphaStack'),
+          ],
+        ),
+        automaticallyImplyLeading: false,
+      ),
+      body: Column(
+        children: [
+          // Welcome message
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AlphaStackApp.accentBlue.withAlpha(30),
+                  AlphaStackApp.accentGreen.withAlpha(15),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: AlphaStackApp.accentBlue.withAlpha(60)),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.rocket_launch_rounded,
+                    size: 48, color: AlphaStackApp.accentBlue),
+                const SizedBox(height: 12),
+                Text(
+                  'Set up your API keys',
+                  style:
+                      Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Connect your Binance account and configure the backend server to start trading with AI.',
+                  textAlign: TextAlign.center,
+                  style:
+                      Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AlphaStackApp.textSecondary,
+                          ),
+                ),
+              ],
+            ),
+          ),
+          // The API keys form
+          Expanded(
+            child: ApiKeysScreen(
+              onSaved: onConfigured,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

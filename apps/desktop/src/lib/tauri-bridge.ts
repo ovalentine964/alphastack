@@ -110,4 +110,52 @@ export const tauriBridge = {
     const { appWindow } = await import("@tauri-apps/api/window");
     await appWindow.hide();
   },
+
+  // ── Secure storage helpers ───────────────────────────────────
+
+  /**
+   * Save API credentials securely.
+   */
+  async saveCredentials(creds: {
+    binanceApiKey?: string;
+    binanceApiSecret?: string;
+    mimoApiKey?: string;
+  }): Promise<void> {
+    const s = await getStore();
+    if (creds.binanceApiKey !== undefined)
+      await s.set("binanceApiKey", creds.binanceApiKey);
+    if (creds.binanceApiSecret !== undefined)
+      await s.set("binanceApiSecret", creds.binanceApiSecret);
+    if (creds.mimoApiKey !== undefined)
+      await s.set("mimoApiKey", creds.mimoApiKey);
+    await s.save();
+  },
+
+  /**
+   * Load API credentials.
+   */
+  async loadCredentials(): Promise<{
+    binanceApiKey: string;
+    binanceApiSecret: string;
+    mimoApiKey: string;
+  }> {
+    return {
+      binanceApiKey:
+        (await this.getSetting<string>("binanceApiKey")) ?? "",
+      binanceApiSecret:
+        (await this.getSetting<string>("binanceApiSecret")) ?? "",
+      mimoApiKey:
+        (await this.getSetting<string>("mimoApiKey")) ?? "",
+    };
+  },
+
+  /**
+   * Clear all stored credentials.
+   */
+  async clearCredentials(): Promise<void> {
+    await this.deleteSetting("binanceApiKey");
+    await this.deleteSetting("binanceApiSecret");
+    await this.deleteSetting("mimoApiKey");
+    await this.deleteSetting("authToken");
+  },
 };

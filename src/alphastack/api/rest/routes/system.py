@@ -1,4 +1,4 @@
-"""System Routes – health check, system status, current config."""
+"""System Routes – health check, system status, current config, readiness probes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from alphastack.core.config import get_settings
@@ -29,6 +30,7 @@ class HealthResponse(BaseModel):
     version: str
     uptime_seconds: float
     timestamp: datetime
+    checks: dict[str, str]
 
 
 class SystemStatus(BaseModel):
@@ -36,7 +38,7 @@ class SystemStatus(BaseModel):
     python_version: str
     environment: str
     uptime_seconds: float
-    components: dict[str, str]  # component → status
+    components: dict[str, str]
 
 
 class ConfigResponse(BaseModel):
@@ -57,17 +59,75 @@ class ConfigResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Health check helpers
+# ---------------------------------------------------------------------------
+
+async def _check_database() -> str:
+    """Ping the database via SQLAlchemy."""
+    try:
+        from alphastack.core.database import get_engine
+        engine = get_engine()
+        async with engine.connect() as conn:
+            await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+        return "healthy"
+    except Exception as exc:
+        logger.warning("healthcheck.db_failed", error=str(exc))
+        return f"unhealthy: {exc}"
+
+
+async def _check_redis() -> str:
+    """Ping Redis."""
+    try:
+        from alphastack.core.redis_client import get_redis
+        r = get_redis()
+        await r.ping()
+        return "healthy"
+    except Exception as exc:
+        logger.warning("healthcheck.redis_failed", error=str(exc))
+        return f"unhealthy: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Basic health check."""
+    """Liveness probe — returns 200 if the process is alive."""
     return HealthResponse(
         status="healthy",
         version="0.1.0",
         uptime_seconds=round(time.time() - _START_TIME, 2),
         timestamp=datetime.now(timezone.utc),
+        checks={"process": "healthy"},
+    )
+
+
+@router.get("/health/ready")
+async def readiness_check():
+    """Readiness probe — checks database and Redis connectivity."""
+    db_status = await _check_database()
+    redis_status = await _check_redis()
+
+    checks = {
+        "database": db_status,
+        "redis": redis_status,
+    }
+
+    all_healthy = all(v == "healthy" or v == "not_configured" for v in checks.values())
+    resp = HealthResponse(
+        status="ready" if all_healthy else "not_ready",
+        version="0.1.0",
+        uptime_seconds=round(time.time() - _START_TIME, 2),
+        timestamp=datetime.now(timezone.utc),
+        checks=checks,
+    )
+
+    if all_healthy:
+        return resp
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=resp.model_dump(mode="json"),
     )
 
 
@@ -75,6 +135,9 @@ async def health_check() -> HealthResponse:
 async def system_status() -> SystemStatus:
     """Detailed system status."""
     settings = get_settings()
+    db_status = await _check_database()
+    redis_status = await _check_redis()
+
     return SystemStatus(
         platform=f"{platform.system()} {platform.release()}",
         python_version=platform.python_version(),
@@ -82,11 +145,8 @@ async def system_status() -> SystemStatus:
         uptime_seconds=round(time.time() - _START_TIME, 2),
         components={
             "api": "healthy",
-            "database": "unknown",  # ping DB in production
-            "redis": "unknown",
-            "timescaledb": "unknown",
-            "trading_engine": "unknown",
-            "data_pipeline": "unknown",
+            "database": db_status,
+            "redis": redis_status,
         },
     )
 

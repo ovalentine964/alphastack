@@ -9,6 +9,7 @@ from alphastack.strategy.context import (
     StructureType,
 )
 from alphastack.strategy.steps.base import AlphaStackStep
+from alphastack.strategy.config import strategy_params
 
 
 def _detect_swings(highs: list[float], lows: list[float], lookback: int = 3) -> tuple[list[float], list[float]]:
@@ -61,7 +62,10 @@ class MarketStructure(AlphaStackStep):
         highs: list[float] = md.get("highs", [])
         lows: list[float] = md.get("lows", [])
 
-        lookback: int = md.get("swing_lookback", 3)
+        lookback: int = md.get(
+            "swing_lookback",
+            strategy_params.get("structure.swing_lookback", 5),
+        )
         swing_highs, swing_lows = _detect_swings(highs, lows, lookback)
         structure_type, direction = _classify_structure(swing_highs, swing_lows)
 
@@ -83,8 +87,8 @@ class MarketStructure(AlphaStackStep):
         structure = StructureData(
             structure_type=structure_type,
             direction=direction,
-            swing_highs=swing_highs[-5:],  # keep last 5
-            swing_lows=swing_lows[-5:],
+            swing_highs=swing_highs[-strategy_params.get("structure.keep_last_n_swings", 5):],
+            swing_lows=swing_lows[-strategy_params.get("structure.keep_last_n_swings", 5):],
         )
 
         return context.update(structure=structure)

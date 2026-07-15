@@ -23,10 +23,17 @@ class PositionSizingStep(AlphaStackStep):
         spread_pips: float = md.get("spread_pips", 1.5)
         pip_value: float = md.get("pip_value", 10.0)  # $ per pip per standard lot
 
-        # Estimate stop distance (use ATR * multiplier or fixed from step 12)
-        atr_pips: float = md.get("atr_pips", 50.0)
-        stop_multiplier: float = md.get("stop_multiplier", 1.5)
-        stop_distance_pips = atr_pips * stop_multiplier + spread_pips  # include spread
+        # Use ACTUAL stop price from step 12 (which now runs before this step)
+        stop_price = context.stop_loss.price
+        entry_price: float = md.get("close", 0.0)
+
+        if stop_price == 0.0 or entry_price == 0.0:
+            return context.update(sizing=PositionSizing())
+
+        # Actual stop distance in pips (from the computed stop, not an estimate)
+        stop_distance_pips = abs(entry_price - stop_price) / pip_size
+        # Add spread cost on top
+        stop_distance_pips += spread_pips
 
         if stop_distance_pips <= 0:
             return context.update(sizing=PositionSizing())

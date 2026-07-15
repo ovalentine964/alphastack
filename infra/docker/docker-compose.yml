@@ -1,17 +1,38 @@
-version: "3.9"
+# =============================================================================
+# AlphaStack – Docker Compose (Production-ready)
+# =============================================================================
+# Secrets are loaded from .env file (never committed) or Docker secrets.
+# Copy .env.example to .env and fill in your values.
 
 x-common-env: &common-env
-  ALPHASTACK_ENV: dev
+  ALPHASTACK_ENV: ${ALPHASTACK_ENV:-dev}
   DB_HOST: timescaledb
-  DB_PORT: 5432
-  DB_NAME: alphastack
-  DB_USER: alphastack
-  DB_PASSWORD: alphastack
+  DB_PORT: "5432"
+  DB_NAME: ${DB_NAME:-alphastack}
+  DB_USER: ${DB_USER:-alphastack}
+  DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
   REDIS_HOST: redis
-  REDIS_PORT: 6379
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
   API_HOST: "0.0.0.0"
-  API_PORT: 8000
-  API_DEBUG: "true"
+  API_PORT: "8000"
+  API_DEBUG: ${API_DEBUG:-false}
+
+x-resource-limits: &resource-limits
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: "2.0"
+      reservations:
+        memory: 512M
+        cpus: "0.5"
+
+networks:
+  alphastack-net:
+    driver: bridge
+  monitoring-net:
+    driver: bridge
 
 services:
   # ---------------------------------------------------------------------------
@@ -22,18 +43,27 @@ services:
     container_name: alphastack-timescaledb
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${DB_PORT_EXTERNAL:-5432}:5432"
     environment:
-      POSTGRES_DB: alphastack
-      POSTGRES_USER: alphastack
-      POSTGRES_PASSWORD: alphastack
+      POSTGRES_DB: ${DB_NAME:-alphastack}
+      POSTGRES_USER: ${DB_USER:-alphastack}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U alphastack"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-alphastack} -d ${DB_NAME:-alphastack}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    networks:
+      - alphastack-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # ---------------------------------------------------------------------------
   # Redis
@@ -42,38 +72,30 @@ services:
     image: redis:7-alpine
     container_name: alphastack-redis
     restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT_EXTERNAL:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ---------------------------------------------------------------------------
-  # Trading Engine (background worker)
-  # ---------------------------------------------------------------------------
-  trading-engine:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile
-    container_name: alphastack-engine
-    restart: unless-stopped
-    command: ["python", "-m", "alphastack.engine"]
-    environment:
-      <<: *common-env
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../../src:/app/src
-      - ../../logs:/app/logs
-    profiles:
-      - engine
+      start_period: 10s
+    networks:
+      - alphastack-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 64M
 
   # ---------------------------------------------------------------------------
   # API Server
@@ -84,9 +106,9 @@ services:
       dockerfile: infra/docker/Dockerfile
     container_name: alphastack-api
     restart: unless-stopped
-    command: ["uvicorn", "alphastack.api.rest.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "alphastack.api.rest.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     environment:
       <<: *common-env
     depends_on:
@@ -94,10 +116,126 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     volumes:
-      - ../../src:/app/src
-      - ../../logs:/app/logs
+      - api_logs:/app/logs
+    networks:
+      - alphastack-net
+    <<: *resource-limits
+
+  # ---------------------------------------------------------------------------
+  # Trading Engine (background worker)
+  # ---------------------------------------------------------------------------
+  trading-engine:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: alphastack-engine
+    restart: unless-stopped
+    command: ["python", "-m", "alphastack.agents.orchestrator.graph"]
+    environment:
+      <<: *common-env
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import alphastack; print('ok')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - engine_logs:/app/logs
+    networks:
+      - alphastack-net
+    profiles:
+      - engine
+    <<: *resource-limits
+
+  # ---------------------------------------------------------------------------
+  # Prometheus (monitoring)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: alphastack-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.size=5GB"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - alphastack-net
+      - monitoring-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Grafana (dashboards)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: alphastack-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_URL:-http://localhost:3001}
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - monitoring-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
 
 volumes:
   timescaledb_data:
+    driver: local
   redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  api_logs:
+    driver: local
+  engine_logs:
+    driver: local

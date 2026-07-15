@@ -1,0 +1,64 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Node / JS
+node_modules
+.next
+.nuxt
+
+# Rust build artifacts
+src/rust_core/target/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in image)
+docs/
+architecture/
+research/
+reviews/
+fixes/
+*.md
+!README.md
+
+# CI/CD
+.github
+
+# Docker
+Dockerfile
+docker-compose.yml
+infra/
+
+# Flutter
+apps/mobile/.dart_tool/
+apps/mobile/build/
+
+# Desktop
+apps/desktop/src-tauri/target/

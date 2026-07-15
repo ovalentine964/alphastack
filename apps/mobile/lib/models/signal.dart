@@ -6,64 +6,116 @@ part 'signal.g.dart';
 class Signal {
   final String id;
   final String symbol;
+  @JsonKey(name: 'direction')
   final SignalDirection direction;
-  final SignalStatus status;
-  final double entryPrice;
-  final double? targetPrice;
+  @JsonKey(name: 'strength', unknownEnumValue: SignalStrength.moderate)
+  final SignalStrength strength;
+  @JsonKey(name: 'strategy_id')
+  final String strategyId;
+  final double confidence;
+  @JsonKey(name: 'entry_price')
+  final double? entryPrice;
+  @JsonKey(name: 'stop_loss')
   final double? stopLoss;
-  final double confluenceScore;
-  final List<String> factors;
-  final String? strategy;
-  final String? timeframe;
-  final double? confidence;
+  @JsonKey(name: 'take_profit')
+  final double? takeProfit;
+  @JsonKey(name: 'risk_reward')
+  final double? riskReward;
+  final String reason;
+  @JsonKey(name: 'created_at')
   final DateTime createdAt;
+  @JsonKey(name: 'expires_at')
   final DateTime? expiresAt;
-  final DateTime? triggeredAt;
-  final Map<String, dynamic>? metadata;
+  @JsonKey(name: 'is_active', defaultValue: true)
+  final bool isActive;
 
   const Signal({
     required this.id,
     required this.symbol,
     required this.direction,
-    required this.status,
-    required this.entryPrice,
-    this.targetPrice,
+    required this.strength,
+    required this.strategyId,
+    required this.confidence,
+    this.entryPrice,
     this.stopLoss,
-    required this.confluenceScore,
-    required this.factors,
-    this.strategy,
-    this.timeframe,
-    this.confidence,
+    this.takeProfit,
+    this.riskReward,
+    this.reason = '',
     required this.createdAt,
     this.expiresAt,
-    this.triggeredAt,
-    this.metadata,
+    this.isActive = true,
   });
 
   factory Signal.fromJson(Map<String, dynamic> json) =>
       _$SignalFromJson(json);
   Map<String, dynamic> toJson() => _$SignalToJson(this);
 
-  bool get isActive => status == SignalStatus.active;
-  bool get isBuy => direction == SignalDirection.buy;
+  // ── Convenience getters for UI compatibility ──
+
+  bool get isBuy =>
+      direction == SignalDirection.long || direction == SignalDirection.buy;
+
   bool get isExpired =>
       expiresAt != null && expiresAt!.isBefore(DateTime.now());
 
+  /// Confluence score as 0–1 float (derived from strength enum).
+  double get confluenceScore {
+    switch (strength) {
+      case SignalStrength.veryStrong:
+        return 0.9;
+      case SignalStrength.strong:
+        return 0.7;
+      case SignalStrength.moderate:
+        return 0.5;
+      case SignalStrength.weak:
+        return 0.3;
+    }
+  }
+
+  /// Human-readable confluence label.
+  String get confluenceLabel {
+    switch (strength) {
+      case SignalStrength.veryStrong:
+        return 'Very Strong';
+      case SignalStrength.strong:
+        return 'Strong';
+      case SignalStrength.moderate:
+        return 'Moderate';
+      case SignalStrength.weak:
+        return 'Weak';
+    }
+  }
+
+  /// Risk/reward ratio (server provides it, or compute from prices).
   double get riskRewardRatio {
-    if (targetPrice == null || stopLoss == null) return 0;
-    final reward = (targetPrice! - entryPrice).abs();
-    final risk = (entryPrice - stopLoss!).abs();
+    if (riskReward != null && riskReward! > 0) return riskReward!;
+    if (takeProfit == null || stopLoss == null || entryPrice == null) return 0;
+    final reward = (takeProfit! - entryPrice!).abs();
+    final risk = (entryPrice! - stopLoss!).abs();
     if (risk == 0) return 0;
     return reward / risk;
   }
 
-  String get confluenceLabel {
-    if (confluenceScore >= 0.8) return 'Very Strong';
-    if (confluenceScore >= 0.6) return 'Strong';
-    if (confluenceScore >= 0.4) return 'Moderate';
-    if (confluenceScore >= 0.2) return 'Weak';
-    return 'Very Weak';
+  /// Factors list — the server provides `reason` as a single string.
+  /// For UI compatibility we split by comma or return a single-item list.
+  List<String> get factors {
+    if (reason.isEmpty) return [];
+    // If reason contains comma-separated items, split them.
+    if (reason.contains(',')) {
+      return reason.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    }
+    return [reason];
   }
+
+  /// Backward-compat alias for UI screens that reference `targetPrice`.
+  double? get targetPrice => takeProfit;
+
+  /// Backward-compat alias for UI screens that reference `strategy`.
+  String? get strategy => strategyId;
+
+  /// Backward-compat alias for UI screens that reference `timeframe`.
+  /// The server doesn't provide this; return null.
+  String? get timeframe => null;
 }
 
 @JsonSerializable()
@@ -96,8 +148,22 @@ enum SignalDirection {
   long,
   @JsonValue('short')
   short,
+  @JsonValue('neutral')
+  neutral,
 }
 
+enum SignalStrength {
+  @JsonValue('weak')
+  weak,
+  @JsonValue('moderate')
+  moderate,
+  @JsonValue('strong')
+  strong,
+  @JsonValue('very_strong')
+  veryStrong,
+}
+
+// Keep SignalStatus for backward compat with any code that references it.
 enum SignalStatus {
   @JsonValue('active')
   active,

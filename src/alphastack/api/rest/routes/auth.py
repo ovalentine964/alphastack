@@ -1,15 +1,22 @@
-"""Auth Routes – JWT login, refresh, logout."""
+"""Auth Routes – JWT login, refresh, logout.
+
+Uses PyJWT for token handling.  In production, wire to the full
+AuthManager from security/auth.py with Argon2id password hashing
+and TOTP 2FA support.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import jwt  # PyJWT
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from alphastack.utils.logger import get_logger
@@ -19,55 +26,36 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/auth")
 
 # ---------------------------------------------------------------------------
-# JWT helpers (minimal, no external dependency – use PyJWT in production)
+# JWT config
 # ---------------------------------------------------------------------------
 
-import base64
-import json
-
-
-_SECRET = secrets.token_urlsafe(64)  # Rotate on restart; read from env in prod
+_SECRET = os.environ.get("ALPHASTACK_JWT_SECRET", secrets.token_urlsafe(64))
 _ALGORITHM = "HS256"
 _ACCESS_TTL = timedelta(minutes=30)
 _REFRESH_TTL = timedelta(days=7)
 
 
-def _b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def _b64url_decode(s: str) -> bytes:
-    s += "=" * (-len(s) % 4)
-    return base64.urlsafe_b64decode(s)
-
-
 def create_token(sub: str, ttl: timedelta, token_type: str = "access") -> str:
-    header = _b64url(json.dumps({"alg": _ALGORITHM, "typ": "JWT"}).encode())
+    """Create a JWT token using PyJWT."""
     now = int(time.time())
-    payload = _b64url(json.dumps({
+    payload = {
         "sub": sub,
         "type": token_type,
         "iat": now,
         "exp": now + int(ttl.total_seconds()),
-    }).encode())
-    sig_input = f"{header}.{payload}".encode()
-    signature = _b64url(hmac.new(_SECRET.encode(), sig_input, hashlib.sha256).digest())
-    return f"{header}.{payload}.{signature}"
+        "jti": secrets.token_hex(16),
+    }
+    return jwt.encode(payload, _SECRET, algorithm=_ALGORITHM)
 
 
 def decode_token(token: str) -> dict[str, Any]:
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise ValueError("Invalid token format")
-    header, payload, sig = parts
-    sig_input = f"{header}.{payload}".encode()
-    expected = _b64url(hmac.new(_SECRET.encode(), sig_input, hashlib.sha256).digest())
-    if not hmac.compare_digest(sig, expected):
-        raise ValueError("Invalid signature")
-    data = json.loads(_b64url_decode(payload))
-    if data.get("exp", 0) < time.time():
+    """Decode and verify a JWT token using PyJWT."""
+    try:
+        return jwt.decode(token, _SECRET, algorithms=[_ALGORITHM])
+    except jwt.ExpiredSignatureError:
         raise ValueError("Token expired")
-    return data
+    except jwt.InvalidTokenError as exc:
+        raise ValueError(f"Invalid token: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +63,23 @@ def decode_token(token: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., min_length=1, max_length=64)
-    password: str = Field(..., min_length=1)
+    """Unified login schema — accepts {username, password} or {apiKey, apiSecret}.
+
+    Mobile clients send {apiKey, apiSecret}; web clients send {username, password}.
+    Both formats are normalised to (username, password) via resolved_credentials().
+    """
+    username: str | None = Field(None, min_length=1, max_length=64)
+    password: str | None = Field(None, min_length=1, max_length=128)
+    apiKey: str | None = Field(None, min_length=1, max_length=128)
+    apiSecret: str | None = Field(None, min_length=1, max_length=128)
+
+    model_config = {"populate_by_name": True}
+
+    def resolved_credentials(self) -> tuple[str, str]:
+        """Return (username, password) from whichever fields were provided."""
+        uname = self.username or self.apiKey or ""
+        pwd = self.password or self.apiSecret or ""
+        return uname, pwd
 
 
 class TokenResponse(BaseModel):
@@ -95,7 +98,60 @@ class MessageResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Simple user store (replace with DB-backed auth in production)
+# Token blocklist (in-memory; replace with Redis in production)
+# ---------------------------------------------------------------------------
+
+class TokenBlocklist:
+    """In-memory token revocation blocklist.
+
+    Stores revoked JTI claims so the auth middleware can reject them.
+    In production, back this with Redis or a database table.
+    """
+
+    def __init__(self) -> None:
+        self._revoked: set[str] = set()
+
+    def revoke(self, jti: str) -> None:
+        self._revoked.add(jti)
+
+    def is_revoked(self, jti: str) -> bool:
+        return jti in self._revoked
+
+    def clear(self) -> None:
+        self._revoked.clear()
+
+
+blocklist = TokenBlocklist()
+
+
+# ---------------------------------------------------------------------------
+# Auth manager wrapper (for middleware compatibility)
+# ---------------------------------------------------------------------------
+
+class _AuthJWTWrapper:
+    """Thin wrapper exposing decode_token as the middleware expects."""
+
+    @staticmethod
+    def decode_token(token: str) -> dict[str, Any]:
+        return decode_token(token)
+
+
+class _AuthManagerWrapper:
+    """Minimal auth manager for middleware compatibility."""
+
+    jwt = _AuthJWTWrapper()
+
+
+_auth_manager = _AuthManagerWrapper()
+
+
+def get_auth_manager() -> _AuthManagerWrapper:
+    """Return the auth manager singleton (used by auth middleware)."""
+    return _auth_manager
+
+
+# ---------------------------------------------------------------------------
+# User store (replace with DB-backed auth in production)
 # ---------------------------------------------------------------------------
 
 _DEMO_USERS: dict[str, str] = {
@@ -116,14 +172,20 @@ def _verify_credentials(username: str, password: str) -> bool:
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest) -> TokenResponse:
-    """Authenticate and return JWT tokens."""
-    if not _verify_credentials(body.username, body.password):
-        logger.warning("login_failed", username=body.username)
+    """Authenticate and return JWT tokens.
+
+    Accepts both {username, password} and {apiKey, apiSecret} formats.
+    """
+    username, password = body.resolved_credentials()
+    if not username or not password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing credentials")
+    if not _verify_credentials(username, password):
+        logger.warning("login_failed", username=username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    access = create_token(body.username, _ACCESS_TTL, "access")
-    refresh = create_token(body.username, _REFRESH_TTL, "refresh")
-    logger.info("login_success", username=body.username)
+    access = create_token(username, _ACCESS_TTL, "access")
+    refresh = create_token(username, _REFRESH_TTL, "refresh")
+    logger.info("login_success", username=username)
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
@@ -153,7 +215,16 @@ async def refresh_token(body: RefreshRequest) -> TokenResponse:
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout() -> MessageResponse:
-    """Logout (client discards tokens; server-side revocation via blocklist)."""
-    # In production: add token jti to Redis blocklist
+async def logout(request: Request) -> MessageResponse:
+    """Logout — revoke the current access token's JTI."""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            payload = decode_token(token)
+            jti = payload.get("jti", "")
+            if jti:
+                blocklist.revoke(jti)
+        except Exception:
+            pass  # Token already invalid — that's fine
     return MessageResponse(message="Logged out")

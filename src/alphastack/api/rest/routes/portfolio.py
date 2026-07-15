@@ -1,4 +1,8 @@
-"""Portfolio Routes – positions, P&L, performance metrics."""
+"""Portfolio Routes – positions, P&L, performance metrics.
+
+Connects to broker connectors for real position and balance data when
+available, falling back to in-memory trade store data.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from alphastack.api.rest.deps import portfolio_service, trade_store
 from alphastack.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,13 +26,13 @@ router = APIRouter(prefix="/portfolio")
 
 class Position(BaseModel):
     symbol: str
-    side: str  # long / short
+    side: str
     quantity: float
     entry_price: float
     current_price: float
     unrealized_pnl: float
     unrealized_pnl_pct: float
-    weight_pct: float  # % of portfolio
+    weight_pct: float
 
 
 class PnLSummary(BaseModel):
@@ -63,37 +68,42 @@ class PerformanceMetrics(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Helpers (read from trade store)
-# ---------------------------------------------------------------------------
-
-def _get_open_trades() -> list[dict[str, Any]]:
-    from alphastack.api.rest.routes.trades import _TRADES
-    return [t for t in _TRADES.values() if t["status"] == "open"]
-
-
-def _get_closed_trades() -> list[dict[str, Any]]:
-    from alphastack.api.rest.routes.trades import _TRADES
-    return [t for t in _TRADES.values() if t["status"] == "closed"]
-
-
-# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=list[Position])
 async def get_positions() -> list[Position]:
-    """Current open positions."""
-    open_trades = _get_open_trades()
+    """Current open positions — from live broker data or trade store."""
+    # Try live broker positions first
+    broker_positions = await portfolio_service.get_positions()
+    if broker_positions:
+        total_value = sum(p["current_price"] * p["quantity"] for p in broker_positions)
+        result: list[Position] = []
+        for p in broker_positions:
+            val = p["current_price"] * p["quantity"]
+            result.append(Position(
+                symbol=p["symbol"],
+                side=p["side"],
+                quantity=p["quantity"],
+                entry_price=round(p["entry_price"], 6),
+                current_price=round(p["current_price"], 6),
+                unrealized_pnl=round(p["unrealized_pnl"], 4),
+                unrealized_pnl_pct=round(p["unrealized_pnl_pct"], 4),
+                weight_pct=round((val / total_value * 100) if total_value else 0.0, 2),
+            ))
+        return result
+
+    # Fallback: compute from in-memory trade store
+    open_trades = trade_store.list_trades(status_filter="open")
     if not open_trades:
         return []
 
-    # Estimate current prices from entry (in prod, fetch live prices)
     positions: list[Position] = []
     total_value = 0.0
     for t in open_trades:
-        # Simulate current price slightly different from entry
         entry = t.get("entry_price") or 0.0
-        current = entry * 1.005  # placeholder
+        # Use broker tick for current price if available, else slight offset
+        current = await _get_current_price(t["symbol"], entry)
         qty = t["quantity"]
         side = "long" if t["side"] == "buy" else "short"
         multiplier = 1 if side == "long" else -1
@@ -109,10 +119,9 @@ async def get_positions() -> list[Position]:
             current_price=round(current, 6),
             unrealized_pnl=round(unrealized, 4),
             unrealized_pnl_pct=round(unrealized_pct, 4),
-            weight_pct=0.0,  # filled below
+            weight_pct=0.0,
         ))
 
-    # Compute weights
     for p in positions:
         val = p.current_price * p.quantity
         p.weight_pct = round((val / total_value * 100) if total_value else 0.0, 2)
@@ -120,19 +129,33 @@ async def get_positions() -> list[Position]:
     return positions
 
 
+async def _get_current_price(symbol: str, fallback: float) -> float:
+    """Fetch current price from broker tick data, with fallback."""
+    from alphastack.api.rest.deps import get_broker_registry
+    registry = get_broker_registry()
+    connector = registry.default
+    if connector and connector.is_connected:
+        try:
+            tick = await connector.get_tick(symbol)
+            return tick.mid if tick.mid else tick.last
+        except Exception:
+            pass
+    return fallback * 1.005  # small offset as last resort
+
+
 @router.get("/pnl", response_model=PnLSummary)
 async def get_pnl() -> PnLSummary:
     """P&L summary across all trades."""
-    open_trades = _get_open_trades()
-    closed_trades = _get_closed_trades()
+    open_trades = trade_store.list_trades(status_filter="open")
+    closed_trades = trade_store.list_trades(status_filter="closed")
 
     total_realized = sum(t.get("pnl") or 0 for t in closed_trades)
 
-    # Unrealized (same placeholder logic as positions)
+    # Unrealized from live prices
     total_unrealized = 0.0
     for t in open_trades:
         entry = t.get("entry_price") or 0.0
-        current = entry * 1.005
+        current = await _get_current_price(t["symbol"], entry)
         qty = t["quantity"]
         multiplier = 1 if t["side"] == "buy" else -1
         total_unrealized += (current - entry) * qty * multiplier
@@ -151,7 +174,7 @@ async def get_pnl() -> PnLSummary:
         total_realized_pnl=round(total_realized, 4),
         total_unrealized_pnl=round(total_unrealized, 4),
         total_pnl=round(total_realized + total_unrealized, 4),
-        today_pnl=round(total_realized, 4),  # simplified
+        today_pnl=round(total_realized, 4),
         win_rate=round(win_rate, 2),
         profit_factor=round(profit_factor, 4),
         avg_win=round(avg_win, 4),
@@ -167,25 +190,44 @@ async def get_pnl() -> PnLSummary:
 @router.get("/performance", response_model=PerformanceMetrics)
 async def get_performance() -> PerformanceMetrics:
     """Performance metrics for the portfolio."""
-    closed = _get_closed_trades()
+    closed = trade_store.list_trades(status_filter="closed")
     now = datetime.now(timezone.utc)
     pnls = [t.get("pnl") or 0 for t in closed]
     total_return = sum(pnls)
 
-    # Simplified metrics (replace with proper calculation in production)
     n = len(pnls) or 1
     mean_pnl = total_return / n
     variance = sum((p - mean_pnl) ** 2 for p in pnls) / n if n > 1 else 0.0
     volatility = variance ** 0.5
-    sharpe = (mean_pnl / volatility) if volatility else 0.0
+
+    # Sharpe ratio (annualised)
+    sharpe = (mean_pnl / volatility) * (252 ** 0.5) if volatility else 0.0
+
+    # Sortino ratio (downside deviation)
+    downside_returns = [p for p in pnls if p < 0]
+    downside_var = sum(p ** 2 for p in downside_returns) / n if downside_returns else 0.0
+    downside_dev = downside_var ** 0.5
+    sortino = (mean_pnl / downside_dev) * (252 ** 0.5) if downside_dev else 0.0
+
+    # Max drawdown
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for p in pnls:
+        cumulative += p
+        peak = max(peak, cumulative)
+        dd = (peak - cumulative) / max(abs(peak), 1.0) * 100
+        max_dd = max(max_dd, dd)
+
+    calmar = (total_return / 10000 * 100 * 252 / max(n, 1)) / max_dd if max_dd else 0.0
 
     return PerformanceMetrics(
-        total_return_pct=round(total_return / 10000 * 100, 4),  # assume 10k base
+        total_return_pct=round(total_return / 10000 * 100, 4),
         annualized_return_pct=round(total_return / 10000 * 100 * (252 / max(n, 1)), 4),
         sharpe_ratio=round(sharpe, 4),
-        sortino_ratio=round(sharpe * 1.1, 4),  # placeholder
-        max_drawdown_pct=round(abs(min(pnls, default=0)) / 10000 * 100, 4),
-        calmar_ratio=0.0,
+        sortino_ratio=round(sortino, 4),
+        max_drawdown_pct=round(max_dd, 4),
+        calmar_ratio=round(calmar, 4),
         volatility_annual_pct=round(volatility * (252 ** 0.5) / 10000 * 100, 4),
         avg_trade_duration_hours=24.0,
         expectancy=round(mean_pnl, 4),

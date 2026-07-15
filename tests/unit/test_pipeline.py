@@ -105,6 +105,42 @@ class TestAlphaStackPipeline:
         with pytest.raises(ValueError, match="deliberately"):
             await pipeline.run(sample_context)
 
+    @pytest.mark.asyncio
+    async def test_pipeline_returns_frozen_context(self, sample_context: AlphaStackContext) -> None:
+        """Pipeline output must be a frozen (immutable) context."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+
+        result = await pipeline.run(sample_context)
+        assert result.model_config.get("frozen") is True
+
+    @pytest.mark.asyncio
+    async def test_pipeline_preserves_symbol(self, sample_context: AlphaStackContext) -> None:
+        """Pipeline must carry the symbol through all steps."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+
+        result = await pipeline.run(sample_context)
+        assert result.symbol == sample_context.symbol
+
+    @pytest.mark.asyncio
+    async def test_pipeline_listener_error_does_not_break_run(
+        self, sample_context: AlphaStackContext,
+    ) -> None:
+        """A misbehaving listener should not crash the pipeline."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+
+        def bad_listener(sn: int, name: str, ctx: AlphaStackContext) -> None:
+            raise RuntimeError("listener error")
+
+        pipeline.on_step(bad_listener)
+        result = await pipeline.run(sample_context)
+        assert result is not None
+
 
 class TestAlphaStackContext:
     """Tests for the strategy context model."""
@@ -113,21 +149,103 @@ class TestAlphaStackContext:
         ctx = AlphaStackContext(
             symbol="EUR/USD",
             timeframe="1h",
-            current_price=1.1050,
             timestamp=datetime.now(timezone.utc),
+            market_data={"close": 1.1050},
         )
         assert ctx.symbol == "EUR/USD"
         assert ctx.timeframe == "1h"
-        assert ctx.current_price == 1.1050
+        assert ctx.market_data["close"] == 1.1050
 
     def test_context_defaults(self) -> None:
         ctx = AlphaStackContext()
         assert ctx.symbol == ""
-        assert ctx.bias == Bias.NEUTRAL
-        assert ctx.direction == Direction.NONE
+        assert ctx.bias.bias == Bias.NEUTRAL
+        assert ctx.structure.direction == Direction.NONE
 
     def test_context_is_pydantic_model(self) -> None:
         ctx = AlphaStackContext(symbol="GBP/USD")
         data = ctx.model_dump()
         assert "symbol" in data
         assert data["symbol"] == "GBP/USD"
+
+    def test_context_update_returns_new_instance(self) -> None:
+        ctx = AlphaStackContext(symbol="EUR/USD")
+        updated = ctx.update(symbol="GBP/USD")
+        assert updated.symbol == "GBP/USD"
+        assert ctx.symbol == "EUR/USD"  # original unchanged
+        assert updated is not ctx
+
+    def test_context_frozen(self) -> None:
+        ctx = AlphaStackContext(symbol="EUR/USD")
+        with pytest.raises(Exception):
+            ctx.symbol = "GBP/USD"  # type: ignore[misc]
+
+    def test_context_market_data_defaults_empty(self) -> None:
+        ctx = AlphaStackContext()
+        assert ctx.market_data == {}
+
+    def test_context_sub_models_initialized(self) -> None:
+        ctx = AlphaStackContext()
+        # All sub-models should be initialized with defaults
+        assert ctx.fundamental is not None
+        assert ctx.bias is not None
+        assert ctx.session is not None
+        assert ctx.structure is not None
+        assert ctx.sr_levels is not None
+        assert ctx.smc is not None
+        assert ctx.rsi is not None
+        assert ctx.candlestick is not None
+        assert ctx.confluence is not None
+        assert ctx.sizing is not None
+        assert ctx.stop_loss is not None
+        assert ctx.take_profit is not None
+        assert ctx.management is not None
+        assert ctx.exit_signal is not None
+        assert ctx.journal is not None
+
+    def test_context_serialization_roundtrip(self) -> None:
+        ctx = AlphaStackContext(
+            symbol="BTC/USDT",
+            timeframe="4H",
+            market_data={"close": 67500.0},
+        )
+        data = ctx.model_dump()
+        restored = AlphaStackContext.model_validate(data)
+        assert restored.symbol == ctx.symbol
+        assert restored.market_data["close"] == 67500.0
+
+
+class TestPipelineStepBase:
+    """Tests for the AlphaStackStep base class."""
+
+    @pytest.mark.asyncio
+    async def test_step_run_calls_execute(self) -> None:
+        """run() should delegate to execute()."""
+
+        class RecordingStep(AlphaStackStep):
+            step_number = 1
+            step_name = "recording"
+            called = False
+
+            async def execute(self, context: AlphaStackContext) -> AlphaStackContext:
+                RecordingStep.called = True
+                return context
+
+        step = RecordingStep()
+        ctx = AlphaStackContext(symbol="EUR/USD")
+        result = await step.run(ctx)
+        assert RecordingStep.called is True
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_step_run_propagates_exception(self) -> None:
+        class BadStep(AlphaStackStep):
+            step_number = 99
+            step_name = "bad"
+
+            async def execute(self, context: AlphaStackContext) -> AlphaStackContext:
+                raise RuntimeError("oops")
+
+        step = BadStep()
+        with pytest.raises(RuntimeError, match="oops"):
+            await step.run(AlphaStackContext())

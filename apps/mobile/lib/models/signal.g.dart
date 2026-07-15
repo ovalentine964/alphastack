@@ -10,44 +10,37 @@ Signal _$SignalFromJson(Map<String, dynamic> json) => Signal(
       id: json['id'] as String,
       symbol: json['symbol'] as String,
       direction: $enumDecode(_$SignalDirectionEnumMap, json['direction']),
-      status: $enumDecode(_$SignalStatusEnumMap, json['status']),
-      entryPrice: (json['entryPrice'] as num).toDouble(),
-      targetPrice: (json['targetPrice'] as num?)?.toDouble(),
-      stopLoss: (json['stopLoss'] as num?)?.toDouble(),
-      confluenceScore: (json['confluenceScore'] as num).toDouble(),
-      factors: (json['factors'] as List<dynamic>)
-          .map((e) => e as String)
-          .toList(),
-      strategy: json['strategy'] as String?,
-      timeframe: json['timeframe'] as String?,
-      confidence: (json['confidence'] as num?)?.toDouble(),
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      expiresAt: json['expiresAt'] == null
+      strength: $enumDecode(_$SignalStrengthEnumMap, json['strength'],
+          unknownValue: SignalStrength.moderate),
+      strategyId: json['strategy_id'] as String,
+      confidence: (json['confidence'] as num).toDouble(),
+      entryPrice: (json['entry_price'] as num?)?.toDouble(),
+      stopLoss: (json['stop_loss'] as num?)?.toDouble(),
+      takeProfit: (json['take_profit'] as num?)?.toDouble(),
+      riskReward: (json['risk_reward'] as num?)?.toDouble(),
+      reason: json['reason'] as String? ?? '',
+      createdAt: DateTime.parse(json['created_at'] as String),
+      expiresAt: json['expires_at'] == null
           ? null
-          : DateTime.parse(json['expiresAt'] as String),
-      triggeredAt: json['triggeredAt'] == null
-          ? null
-          : DateTime.parse(json['triggeredAt'] as String),
-      metadata: json['metadata'] as Map<String, dynamic>?,
+          : DateTime.parse(json['expires_at'] as String),
+      isActive: json['is_active'] as bool? ?? true,
     );
 
 Map<String, dynamic> _$SignalToJson(Signal instance) => <String, dynamic>{
       'id': instance.id,
       'symbol': instance.symbol,
       'direction': _$SignalDirectionEnumMap[instance.direction]!,
-      'status': _$SignalStatusEnumMap[instance.status]!,
-      'entryPrice': instance.entryPrice,
-      'targetPrice': instance.targetPrice,
-      'stopLoss': instance.stopLoss,
-      'confluenceScore': instance.confluenceScore,
-      'factors': instance.factors,
-      'strategy': instance.strategy,
-      'timeframe': instance.timeframe,
+      'strength': _$SignalStrengthEnumMap[instance.strength]!,
+      'strategy_id': instance.strategyId,
       'confidence': instance.confidence,
-      'createdAt': instance.createdAt.toIso8601String(),
-      'expiresAt': instance.expiresAt?.toIso8601String(),
-      'triggeredAt': instance.triggeredAt?.toIso8601String(),
-      'metadata': instance.metadata,
+      'entry_price': instance.entryPrice,
+      'stop_loss': instance.stopLoss,
+      'take_profit': instance.takeProfit,
+      'risk_reward': instance.riskReward,
+      'reason': instance.reason,
+      'created_at': instance.createdAt.toIso8601String(),
+      'expires_at': instance.expiresAt?.toIso8601String(),
+      'is_active': instance.isActive,
     };
 
 const _$SignalDirectionEnumMap = {
@@ -55,13 +48,14 @@ const _$SignalDirectionEnumMap = {
   SignalDirection.sell: 'sell',
   SignalDirection.long: 'long',
   SignalDirection.short: 'short',
+  SignalDirection.neutral: 'neutral',
 };
 
-const _$SignalStatusEnumMap = {
-  SignalStatus.active: 'active',
-  SignalStatus.triggered: 'triggered',
-  SignalStatus.expired: 'expired',
-  SignalStatus.cancelled: 'cancelled',
+const _$SignalStrengthEnumMap = {
+  SignalStrength.weak: 'weak',
+  SignalStrength.moderate: 'moderate',
+  SignalStrength.strong: 'strong',
+  SignalStrength.veryStrong: 'very_strong',
 };
 
 ConfluenceFactor _$ConfluenceFactorFromJson(Map<String, dynamic> json) =>
@@ -79,3 +73,10 @@ Map<String, dynamic> _$ConfluenceFactorToJson(ConfluenceFactor instance) =>
       'score': instance.score,
       'description': instance.description,
     };
+
+const _$SignalStatusEnumMap = {
+  SignalStatus.active: 'active',
+  SignalStatus.triggered: 'triggered',
+  SignalStatus.expired: 'expired',
+  SignalStatus.cancelled: 'cancelled',
+};

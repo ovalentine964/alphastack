@@ -1,15 +1,18 @@
-"""Signal Routes – active signals, signal history."""
+"""Signal Routes – active signals, signal history.
+
+Wired to the SignalStore which subscribes to the event bus for real-time
+signals from the strategy pipeline, with demo data fallback.
+"""
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
-from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
+from alphastack.api.rest.deps import signal_store
 from alphastack.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -57,39 +60,6 @@ class SignalListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory signal store (demo)
-# ---------------------------------------------------------------------------
-
-_SIGNALS: dict[str, dict[str, Any]] = {}
-
-
-def _seed_demo_signals() -> None:
-    if _SIGNALS:
-        return
-    now = datetime.now(timezone.utc)
-    demos = [
-        {"symbol": "BTC/USDT", "direction": "long", "strength": "strong",
-         "strategy_id": "smc_v1", "confidence": 0.85, "entry_price": 67200.0,
-         "stop_loss": 66500.0, "take_profit": 69000.0, "risk_reward": 2.57,
-         "reason": "Bullish order block at 67200 with volume confirmation"},
-        {"symbol": "EUR/USD", "direction": "short", "strength": "moderate",
-         "strategy_id": "mean_revert_v1", "confidence": 0.72, "entry_price": 1.0870,
-         "stop_loss": 1.0920, "take_profit": 1.0780, "risk_reward": 1.8,
-         "reason": "RSI overbought + bearish divergence on H4"},
-        {"symbol": "ETH/USDT", "direction": "long", "strength": "very_strong",
-         "strategy_id": "breakout_v1", "confidence": 0.91, "entry_price": 3520.0,
-         "stop_loss": 3450.0, "take_profit": 3700.0, "risk_reward": 2.57,
-         "reason": "Ascending triangle breakout with high volume"},
-    ]
-    for d in demos:
-        sid = str(uuid.uuid4())
-        _SIGNALS[sid] = {"id": sid, "is_active": True, "created_at": now.isoformat(), "expires_at": None, **d}
-
-
-_seed_demo_signals()
-
-
-# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -99,12 +69,11 @@ async def list_active_signals(
     strategy_id: str | None = None,
 ) -> SignalListResponse:
     """List currently active signals."""
-    items = [s for s in _SIGNALS.values() if s["is_active"]]
-    if symbol:
-        items = [s for s in items if s["symbol"].upper() == symbol.upper()]
-    if strategy_id:
-        items = [s for s in items if s["strategy_id"] == strategy_id]
-    return SignalListResponse(signals=[Signal(**s) for s in items], total=len(items))
+    items = signal_store.list_active(symbol=symbol, strategy_id=strategy_id)
+    return SignalListResponse(
+        signals=[Signal(**_coerce_signal(s)) for s in items],
+        total=len(items),
+    )
 
 
 @router.get("/history", response_model=SignalListResponse)
@@ -114,10 +83,26 @@ async def signal_history(
     symbol: str | None = None,
 ) -> SignalListResponse:
     """Signal history (all signals, active and expired)."""
-    items = list(_SIGNALS.values())
-    if symbol:
-        items = [s for s in items if s["symbol"].upper() == symbol.upper()]
+    items = signal_store.list_all(symbol=symbol)
     total = len(items)
     start = (page - 1) * page_size
     page_items = items[start : start + page_size]
-    return SignalListResponse(signals=[Signal(**s) for s in page_items], total=total)
+    return SignalListResponse(
+        signals=[Signal(**_coerce_signal(s)) for s in page_items],
+        total=total,
+    )
+
+
+def _coerce_signal(s: dict) -> dict:
+    """Ensure signal dict has correct types for the Signal schema."""
+    created = s.get("created_at")
+    if isinstance(created, str):
+        created = datetime.fromisoformat(created)
+    expires = s.get("expires_at")
+    if isinstance(expires, str):
+        expires = datetime.fromisoformat(expires)
+    return {
+        **s,
+        "created_at": created or datetime.utcnow(),
+        "expires_at": expires,
+    }

@@ -1,0 +1,108 @@
+# AlphaStack Prometheus Alert Rules
+groups:
+  - name: alphastack_health
+    rules:
+      # API is down
+      - alert: APIEndpointDown
+        expr: up{job="alphastack-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AlphaStack API is down"
+          description: "The API endpoint has been unreachable for more than 1 minute."
+
+      # Trading engine is down
+      - alert: TradingEngineDown
+        expr: up{job="alphastack-engine"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AlphaStack trading engine is down"
+          description: "The trading engine has been unreachable for more than 1 minute."
+
+      # High error rate
+      - alert: HighAPIErrorRate
+        expr: |
+          rate(alphastack_api_requests_total{status=~"5.."}[5m])
+          / rate(alphastack_api_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate (> 5%)"
+          description: "More than 5% of API requests are returning 5xx errors."
+
+      # High API latency
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(alphastack_api_latency_seconds_bucket[5m])) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency > 2 seconds"
+          description: "The 95th percentile API latency has exceeded 2 seconds for 5 minutes."
+
+  - name: alphastack_trading
+    rules:
+      # No signals generated
+      - alert: NoSignalsGenerated
+        expr: increase(alphastack_signals_total[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No trading signals generated in the last hour"
+          description: "The strategy pipeline has not generated any signals for 2 hours."
+
+      # Risk breach
+      - alert: RiskLimitBreached
+        expr: increase(alphastack_risk_breaches_total{level="critical"}[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical risk limit breach detected"
+          description: "A critical risk limit has been breached in the last 15 minutes."
+
+      # High drawdown
+      - alert: HighDrawdown
+        expr: alphastack_drawdown_pct > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Drawdown exceeds 10%"
+          description: "Account drawdown has exceeded 10% for more than 5 minutes."
+
+      # Stale market data
+      - alert: StaleMarketData
+        expr: alphastack_data_stale_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Market data is stale for {{ $labels.symbol }}"
+          description: "No data updates received for {{ $labels.symbol }} in over 5 minutes."
+
+  - name: alphastack_infrastructure
+    rules:
+      # High memory usage on containers
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container memory usage > 85%"
+          description: "Container {{ $labels.name }} is using more than 85% of its memory limit."
+
+      # Database connection pool exhaustion
+      - alert: DBConnectionPoolHigh
+        expr: alphastack_db_pool_checked_out / alphastack_db_pool_size > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool > 80% utilized"
+          description: "The database connection pool is nearing exhaustion."

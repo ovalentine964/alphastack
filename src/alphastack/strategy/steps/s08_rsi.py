@@ -6,6 +6,7 @@ import math
 
 from alphastack.strategy.context import AlphaStackContext, RSIData
 from alphastack.strategy.steps.base import AlphaStackStep
+from alphastack.strategy.config import strategy_params
 
 
 def _compute_rsi(closes: list[float], period: int = 14) -> float:
@@ -59,25 +60,30 @@ class RSIConfirmation(AlphaStackStep):
         md = context.market_data
 
         closes: list[float] = md.get("closes", [])
-        period: int = md.get("rsi_period", 14)
+        period: int = md.get("rsi_period", strategy_params.get("rsi.period", 14))
 
         # Compute RSI
         rsi_value = _compute_rsi(closes, period)
 
-        # Overbought / oversold
-        if rsi_value >= 70:
+        # Overbought / oversold — regime-adaptive thresholds
+        regime = md.get("regime", None)
+        ob_level = strategy_params.get_regime_override("rsi.overbought", regime, 70) if regime else strategy_params.get("rsi.overbought", 70)
+        os_level = strategy_params.get_regime_override("rsi.oversold", regime, 30) if regime else strategy_params.get("rsi.oversold", 30)
+
+        if rsi_value >= ob_level:
             signal = "overbought"
-        elif rsi_value <= 30:
+        elif rsi_value <= os_level:
             signal = "oversold"
         else:
             signal = "neutral"
 
         # Build rolling RSI series for divergence detection
+        div_lookback = strategy_params.get("rsi.divergence_lookback", 10)
         rsi_series: list[float] = []
         for end in range(period + 1, len(closes) + 1):
             rsi_series.append(_compute_rsi(closes[:end], period))
 
-        divergence = _detect_divergence(closes, rsi_series)
+        divergence = _detect_divergence(closes, rsi_series, lookback=div_lookback)
 
         rsi_data = RSIData(
             value=round(rsi_value, 2),

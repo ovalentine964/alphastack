@@ -1,108 +1,98 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app.dart';
+import '../services/api_service.dart';
+import '../services/websocket_service.dart';
 import '../widgets/portfolio_card.dart';
 import '../widgets/position_tile.dart';
 import '../widgets/signal_card.dart';
 import '../models/trade.dart';
 import '../models/signal.dart';
 
-// Providers
+// ─── Providers ───────────────────────────────────────────────────────────────
+
+/// Portfolio P&L summary from the backend.
 final portfolioProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  // Mock data for initial build; replace with ApiService call
-  await Future.delayed(const Duration(milliseconds: 500));
-  return {
-    'totalBalance': 125430.50,
-    'totalEquity': 128750.25,
-    'totalPnl': 3319.75,
-    'totalPnlPercent': 2.72,
-    'dayPnl': 542.30,
-    'dayPnlPercent': 0.43,
-    'activePositions': 5,
-  };
+  return await ApiService().getPortfolioSummary();
 });
 
+/// Active positions from the backend.
 final positionsProvider = FutureProvider<List<Position>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 600));
-  return [
-    Position(
-      symbol: 'BTC/USDT',
-      side: TradeSide.long,
-      entryPrice: 67250.00,
-      currentPrice: 68120.50,
-      quantity: 0.15,
-      unrealizedPnl: 130.58,
-      unrealizedPnlPercent: 1.29,
-      stopLoss: 65500.00,
-      takeProfit: 72000.00,
-      openedAt: DateTime.now().subtract(const Duration(hours: 6)),
-    ),
-    Position(
-      symbol: 'ETH/USDT',
-      side: TradeSide.long,
-      entryPrice: 3520.00,
-      currentPrice: 3585.40,
-      quantity: 2.5,
-      unrealizedPnl: 163.50,
-      unrealizedPnlPercent: 1.86,
-      openedAt: DateTime.now().subtract(const Duration(hours: 12)),
-    ),
-    Position(
-      symbol: 'SOL/USDT',
-      side: TradeSide.short,
-      entryPrice: 172.50,
-      currentPrice: 168.20,
-      quantity: 30,
-      unrealizedPnl: 129.00,
-      unrealizedPnlPercent: 2.49,
-      openedAt: DateTime.now().subtract(const Duration(hours: 3)),
-    ),
-  ];
+  return await ApiService().getActivePositions();
 });
 
+/// Active signals from the backend.
 final recentSignalsProvider = FutureProvider<List<Signal>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 700));
-  return [
-    Signal(
-      id: 'sig-001',
-      symbol: 'BTC/USDT',
-      direction: SignalDirection.buy,
-      status: SignalStatus.active,
-      entryPrice: 67250.00,
-      targetPrice: 72000.00,
-      stopLoss: 65500.00,
-      confluenceScore: 0.85,
-      factors: ['RSI Oversold', 'Support Level', 'Volume Spike', 'EMA Cross'],
-      strategy: 'Mean Reversion',
-      timeframe: '4H',
-      createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-    ),
-    Signal(
-      id: 'sig-002',
-      symbol: 'SOL/USDT',
-      direction: SignalDirection.sell,
-      status: SignalStatus.active,
-      entryPrice: 172.50,
-      targetPrice: 155.00,
-      stopLoss: 180.00,
-      confluenceScore: 0.72,
-      factors: ['Resistance Rejection', 'Bearish Divergence', 'High RSI'],
-      strategy: 'Breakdown',
-      timeframe: '1H',
-      createdAt: DateTime.now().subtract(const Duration(hours: 1)),
-    ),
-  ];
+  return await ApiService().getActiveSignals();
 });
 
-class DashboardScreen extends ConsumerWidget {
+/// Testnet mode flag.
+final testnetModeProvider = FutureProvider<bool>((ref) async {
+  return await ApiService().isTestnet();
+});
+
+// ─── Dashboard Screen ────────────────────────────────────────────────────────
+
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  final _ws = WebSocketService();
+  StreamSubscription? _wsStateSub;
+  StreamSubscription? _tradeSub;
+  StreamSubscription? _signalSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Connect WebSocket for real-time updates
+    _connectWebSocket();
+  }
+
+  Future<void> _connectWebSocket() async {
+    // Only connect if we have auth token
+    final api = ApiService();
+    final keys = await api.getStoredApiKeys();
+    if (keys['binanceApiKey'] == null) return;
+
+    await _ws.connect();
+
+    // Listen for trade updates → refresh trades/positions
+    _tradeSub = _ws.tradeUpdates.listen((_) {
+      if (mounted) {
+        ref.invalidate(positionsProvider);
+        ref.invalidate(portfolioProvider);
+      }
+    });
+
+    // Listen for signal updates → refresh signals
+    _signalSub = _ws.signalUpdates.listen((_) {
+      if (mounted) {
+        ref.invalidate(recentSignalsProvider);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _wsStateSub?.cancel();
+    _tradeSub?.cancel();
+    _signalSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final portfolio = ref.watch(portfolioProvider);
     final positions = ref.watch(positionsProvider);
     final signals = ref.watch(recentSignalsProvider);
+    final testnet = ref.watch(testnetModeProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -117,25 +107,52 @@ class DashboardScreen extends ConsumerWidget {
                 ),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.auto_graph_rounded, size: 20, color: Colors.white),
+              child: const Icon(Icons.auto_graph_rounded,
+                  size: 20, color: Colors.white),
             ),
             const SizedBox(width: 10),
             const Text('AlphaStack'),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {},
+          // Testnet / Live badge
+          testnet.when(
+            data: (isTest) => Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isTest
+                    ? AlphaStackApp.accentOrange.withAlpha(30)
+                    : AlphaStackApp.accentRed.withAlpha(30),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isTest
+                      ? AlphaStackApp.accentOrange.withAlpha(80)
+                      : AlphaStackApp.accentRed.withAlpha(80),
+                ),
+              ),
+              child: Text(
+                isTest ? 'TESTNET' : 'LIVE',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: isTest
+                      ? AlphaStackApp.accentOrange
+                      : AlphaStackApp.accentRed,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
           ),
-          IconButton(
-            icon: const Icon(Icons.sync_rounded),
-            onPressed: () {
-              ref.invalidate(portfolioProvider);
-              ref.invalidate(positionsProvider);
-              ref.invalidate(recentSignalsProvider);
-            },
-          ),
+          // WebSocket connection indicator
+          const _WsConnectionIndicator(),
+          // Offline indicator
+          const _OfflineIndicator(),
+          const SizedBox(width: 4),
+          const _NotificationButton(),
+          _RefreshButton(),
         ],
       ),
       body: RefreshIndicator(
@@ -143,22 +160,19 @@ class DashboardScreen extends ConsumerWidget {
           ref.invalidate(portfolioProvider);
           ref.invalidate(positionsProvider);
           ref.invalidate(recentSignalsProvider);
+          ref.invalidate(testnetModeProvider);
+          ApiService().clearCache();
         },
         color: AlphaStackApp.accentBlue,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // Offline banner
+            if (ApiService().isOffline) _buildOfflineBanner(),
+
             // Portfolio Card
             portfolio.when(
-              data: (data) => PortfolioCard(
-                totalBalance: data['totalBalance'] as double,
-                totalEquity: data['totalEquity'] as double,
-                totalPnl: data['totalPnl'] as double,
-                totalPnlPercent: data['totalPnlPercent'] as double,
-                dayPnl: data['dayPnl'] as double,
-                dayPnlPercent: data['dayPnlPercent'] as double,
-                activePositions: data['activePositions'] as int,
-              ),
+              data: (data) => _buildPortfolioFromApi(data),
               loading: () => _buildSkeletonCard(height: 200),
               error: (e, _) => _buildErrorCard('Portfolio', e),
             ),
@@ -207,8 +221,10 @@ class DashboardScreen extends ConsumerWidget {
                   return _buildEmptyState('No active signals');
                 }
                 return Column(
-                  children:
-                      data.map((sig) => SignalCard(signal: sig)).toList(),
+                  children: data
+                      .take(3)
+                      .map((sig) => SignalCard(signal: sig))
+                      .toList(),
                 );
               },
               loading: () => _buildSkeletonList(count: 2),
@@ -217,6 +233,64 @@ class DashboardScreen extends ConsumerWidget {
             const SizedBox(height: 80),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildPortfolioFromApi(Map<String, dynamic> data) {
+    // Server PnL response has different field names than the old mock
+    final totalRealized = (data['total_realized_pnl'] as num?)?.toDouble() ?? 0;
+    final totalUnrealized =
+        (data['total_unrealized_pnl'] as num?)?.toDouble() ?? 0;
+    final totalPnl = (data['total_pnl'] as num?)?.toDouble() ?? 0;
+    final todayPnl = (data['today_pnl'] as num?)?.toDouble() ?? 0;
+    final totalTrades = (data['total_trades'] as num?)?.toInt() ?? 0;
+
+    // Estimate balance from PnL (server doesn't provide balance directly)
+    // In a real app, this would come from the broker API
+    const baseBalance = 100000.0;
+    final totalBalance = baseBalance + totalPnl;
+    final totalEquity = totalBalance + totalUnrealized;
+    final totalPnlPct =
+        baseBalance > 0 ? (totalPnl / baseBalance) * 100 : 0.0;
+    final dayPnlPct =
+        baseBalance > 0 ? (todayPnl / baseBalance) * 100 : 0.0;
+
+    return PortfolioCard(
+      totalBalance: totalBalance,
+      totalEquity: totalEquity,
+      totalPnl: totalPnl,
+      totalPnlPercent: totalPnlPct,
+      dayPnl: todayPnl,
+      dayPnlPercent: dayPnlPct,
+      activePositions: totalTrades,
+    );
+  }
+
+  Widget _buildOfflineBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AlphaStackApp.accentOrange.withAlpha(20),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AlphaStackApp.accentOrange.withAlpha(80)),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.cloud_off_rounded, color: AlphaStackApp.accentOrange, size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Offline — showing cached data',
+              style: TextStyle(
+                color: AlphaStackApp.accentOrange,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -264,7 +338,8 @@ class DashboardScreen extends ConsumerWidget {
       ),
       child: Column(
         children: [
-          const Icon(Icons.error_outline, color: AlphaStackApp.accentRed, size: 32),
+          const Icon(Icons.error_outline,
+              color: AlphaStackApp.accentRed, size: 32),
           const SizedBox(height: 8),
           Text(
             'Failed to load $label',
@@ -278,6 +353,16 @@ class DashboardScreen extends ConsumerWidget {
               fontSize: 12,
             ),
             textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: () {
+              ref.invalidate(portfolioProvider);
+              ref.invalidate(positionsProvider);
+              ref.invalidate(recentSignalsProvider);
+            },
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Retry'),
           ),
         ],
       ),
@@ -296,7 +381,8 @@ class DashboardScreen extends ConsumerWidget {
         child: Column(
           children: [
             Icon(Icons.inbox_outlined,
-                size: 40, color: AlphaStackApp.textSecondary.withAlpha(128)),
+                size: 40,
+                color: AlphaStackApp.textSecondary.withAlpha(128)),
             const SizedBox(height: 8),
             Text(
               message,
@@ -308,6 +394,8 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 }
+
+// ─── Widgets ─────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -337,7 +425,8 @@ class _SectionHeader extends StatelessWidget {
             if (count != null) ...[
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: AlphaStackApp.accentBlue.withAlpha(30),
                   borderRadius: BorderRadius.circular(10),
@@ -360,6 +449,139 @@ class _SectionHeader extends StatelessWidget {
             child: const Text('View All'),
           ),
       ],
+    );
+  }
+}
+
+/// WebSocket connection state indicator in the app bar.
+class _WsConnectionIndicator extends StatefulWidget {
+  const _WsConnectionIndicator();
+
+  @override
+  State<_WsConnectionIndicator> createState() => _WsConnectionIndicatorState();
+}
+
+class _WsConnectionIndicatorState extends State<_WsConnectionIndicator> {
+  final _ws = WebSocketService();
+  WebSocketState _wsState = WebSocketState.disconnected;
+  StreamSubscription? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _wsState = _ws.state;
+    _sub = _ws.stateStream.listen((state) {
+      if (mounted) setState(() => _wsState = state);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    String tooltip;
+
+    switch (_wsState) {
+      case WebSocketState.connected:
+        color = AlphaStackApp.accentGreen;
+        tooltip = 'Live data connected';
+        break;
+      case WebSocketState.connecting:
+      case WebSocketState.reconnecting:
+        color = AlphaStackApp.accentOrange;
+        tooltip = 'Reconnecting...';
+        break;
+      case WebSocketState.error:
+        color = AlphaStackApp.accentRed;
+        tooltip = 'Connection error';
+        break;
+      case WebSocketState.disconnected:
+        color = AlphaStackApp.textSecondary;
+        tooltip = 'Disconnected';
+        break;
+    }
+
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        width: 10,
+        height: 10,
+        margin: const EdgeInsets.symmetric(vertical: 18),
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: color.withAlpha(100),
+              blurRadius: 4,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Offline state indicator.
+class _OfflineIndicator extends StatelessWidget {
+  const _OfflineIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: ApiService().offlineStream,
+      initialData: ApiService().isOffline,
+      builder: (context, snapshot) {
+        final isOffline = snapshot.data ?? false;
+        if (!isOffline) return const SizedBox.shrink();
+        return Tooltip(
+          message: 'Offline — showing cached data',
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
+            child: const Icon(
+              Icons.cloud_off_rounded,
+              color: AlphaStackApp.accentOrange,
+              size: 18,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _NotificationButton extends StatelessWidget {
+  const _NotificationButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.notifications_outlined),
+      onPressed: () {},
+    );
+  }
+}
+
+class _RefreshButton extends ConsumerWidget {
+  const _RefreshButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IconButton(
+      icon: const Icon(Icons.sync_rounded),
+      onPressed: () {
+        ref.invalidate(portfolioProvider);
+        ref.invalidate(positionsProvider);
+        ref.invalidate(recentSignalsProvider);
+        ref.invalidate(testnetModeProvider);
+        ApiService().clearCache();
+      },
     );
   }
 }

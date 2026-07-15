@@ -1,0 +1,37 @@
+# Prometheus configuration for AlphaStack
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  # AlphaStack API metrics
+  - job_name: "alphastack-api"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: "api"
+          environment: "production"
+
+  # AlphaStack Trading Engine metrics
+  - job_name: "alphastack-engine"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["trading-engine:8000"]
+        labels:
+          service: "engine"
+          environment: "production"
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Node exporter (optional — add to docker-compose if needed)
+  # - job_name: "node"
+  #   static_configs:
+  #     - targets: ["node-exporter:9100"]
