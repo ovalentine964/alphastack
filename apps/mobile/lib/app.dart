@@ -179,6 +179,7 @@ class AlphaStackApp extends ConsumerWidget {
       ),
     );
   }
+}
 
 /// Bootstrap widget that checks endpoint + auth on first launch.
 /// Shows endpoint setup → auto-authenticates → main app.
