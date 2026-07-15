@@ -89,7 +89,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final _theme = Theme.of(context);
     final portfolio = ref.watch(portfolioProvider);
     final positions = ref.watch(positionsProvider);
     final signals = ref.watch(recentSignalsProvider);
