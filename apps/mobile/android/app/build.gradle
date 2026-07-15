@@ -55,7 +55,7 @@ android {
 
     signingConfigs {
         release {
-            if (keystoreFilePath.isNotEmpty() && keystorePassword.isNotEmpty()) {
+            if (keystoreFilePath && !keystoreFilePath.isEmpty() && keystorePassword && !keystorePassword.isEmpty()) {
                 storeFile file(keystoreFilePath)
                 storePassword keystorePassword
                 keyAlias keyAlias
@@ -66,7 +66,7 @@ android {
 
     buildTypes {
         release {
-            if (keystoreFilePath.isNotEmpty() && keystorePassword.isNotEmpty()) {
+            if (keystoreFilePath && !keystoreFilePath.isEmpty() && keystorePassword && !keystorePassword.isEmpty()) {
                 signingConfig signingConfigs.release
             } else {
                 signingConfig signingConfigs.debug
