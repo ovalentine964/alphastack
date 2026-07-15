@@ -1,12 +1,15 @@
 """
 AlphaStack Live Server
 Connects to Binance TESTNET for real market data + virtual trading.
+
+API contract matches what the Flutter mobile app expects.
 """
 
 import asyncio
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -15,7 +18,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="AlphaStack Live API", version="2.0.0")
+app = FastAPI(title="AlphaStack Live API", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +28,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Binance Testnet Connection ────────────────────────────
+# ─── Binance Connection ───────────────────────────────────
+
+# Read keys from environment or use defaults
+BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
 
 # Public data (no keys needed) — use production for market data
 exchange_public = ccxt.binance({
@@ -33,26 +40,33 @@ exchange_public = ccxt.binance({
     'options': {'defaultType': 'spot'},
 })
 
-# Testnet for trading — configured with user's testnet keys
-exchange_testnet = ccxt.binance({
-    'apiKey': 'RMO3Gq9e7iYpctkI5QRVOi0nv3yA8VjIh8u7pTPtr9F9109TuxHMlDtFnGBLWrth',
-    'secret': 'f7BkykOaAZlh18a83n4kXcmlKxu6V02yggIkKb9wkYHbvT2nVOhZF2BEhJSfsfUV',
-    'enableRateLimit': True,
-    'options': {'defaultType': 'spot'},
-})
-exchange_testnet.set_sandbox_mode(True)  # Binance TESTNET mode
+# Testnet for trading
+exchange_testnet = None
+if BINANCE_API_KEY and BINANCE_API_SECRET:
+    exchange_testnet = ccxt.binance({
+        'apiKey': BINANCE_API_KEY,
+        'secret': BINANCE_API_SECRET,
+        'enableRateLimit': True,
+        'options': {'defaultType': 'spot'},
+    })
+    exchange_testnet.set_sandbox_mode(True)
 
-# Demo balance
-VIRTUAL_BALANCE = {
-    'USDT': 1000.0,
-    'BTC': 0.0,
-    'ETH': 0.0,
-}
-
-# Demo positions
+# In-memory storage
 POSITIONS = []
 TRADES = []
 SIGNALS = []
+
+# Simple token store (for demo — not production-grade JWT)
+_ACTIVE_TOKENS = {}
+
+
+def _generate_token():
+    token = f"tok-{uuid.uuid4().hex[:24]}"
+    _ACTIVE_TOKENS[token] = {
+        "user_id": "user-001",
+        "created": time.time(),
+    }
+    return token
 
 
 # ─── Market Data ───────────────────────────────────────────
@@ -79,7 +93,7 @@ async def get_tickers(symbols: list):
     for sym in symbols:
         t = await get_ticker(sym)
         results.append(t)
-        await asyncio.sleep(0.1)  # Rate limit
+        await asyncio.sleep(0.1)
     return results
 
 
@@ -92,23 +106,66 @@ class LoginRequest(BaseModel):
     password: Optional[str] = None
     testnet: Optional[bool] = True
 
+
 class ApiKeysRequest(BaseModel):
     binanceApiKey: str
     binanceSecretKey: str
     testnet: bool = True
 
+
 @app.post("/api/v1/auth/login")
 async def login(req: LoginRequest):
+    """Authenticate — matches what Flutter ApiService.authenticate() expects."""
+    global exchange_testnet
+
+    # Try to set up testnet with provided keys
+    api_key = req.apiKey or req.username
+    api_secret = req.apiSecret or req.password
+
+    if api_key and api_key != 'demo':
+        try:
+            exchange_testnet = ccxt.binance({
+                'apiKey': api_key,
+                'secret': api_secret or '',
+                'enableRateLimit': True,
+                'options': {'defaultType': 'spot'},
+            })
+            exchange_testnet.set_sandbox_mode(True)
+        except Exception:
+            pass
+
+    token = _generate_token()
+    refresh_token = _generate_token()
+
     return {
-        "token": "live-t…c456",
+        "access_token": token,
+        "refresh_token": refresh_token,
+        "token": token,  # backward compat
         "user": {
             "id": "user-001",
             "username": "trader",
             "plan": "pro",
-            "mode": "testnet" if req.testnet else "live"
+            "mode": "testnet",
         },
-        "message": "Connected to Binance Testnet"
     }
+
+
+@app.post("/api/v1/auth/refresh")
+async def refresh_token(body: dict):
+    """Refresh access token."""
+    old_refresh = body.get("refresh_token", "")
+    if old_refresh not in _ACTIVE_TOKENS:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    del _ACTIVE_TOKENS[old_refresh]
+    new_token = _generate_token()
+    new_refresh = _generate_token()
+
+    return {
+        "access_token": new_token,
+        "refresh_token": new_refresh,
+    }
+
 
 @app.post("/api/v1/auth/set-keys")
 async def set_keys(req: ApiKeysRequest):
@@ -122,8 +179,7 @@ async def set_keys(req: ApiKeysRequest):
         })
         if req.testnet:
             exchange_testnet.set_sandbox_mode(True)
-        
-        # Test connection
+
         balance = exchange_testnet.fetch_balance()
         return {
             "status": "connected",
@@ -140,64 +196,97 @@ async def set_keys(req: ApiKeysRequest):
 
 # ─── Portfolio ─────────────────────────────────────────────
 
-@app.get("/api/v1/portfolio/summary")
-async def portfolio_summary():
+@app.get("/api/v1/portfolio/pnl")
+async def portfolio_pnl():
+    """Portfolio P&L — matches Flutter ApiService.getPortfolioSummary()."""
+    total_realized = sum(t.get('pnl', 0) for t in TRADES if t.get('pnl', 0) != 0)
+    today = datetime.now().date().isoformat()
+    today_pnl = sum(
+        t.get('pnl', 0) for t in TRADES
+        if t.get('pnl', 0) != 0 and t.get('opened_at', '').startswith(today)
+    )
+
+    return {
+        "total_realized_pnl": round(total_realized, 2),
+        "total_unrealized_pnl": 0,
+        "total_pnl": round(total_realized, 2),
+        "today_pnl": round(today_pnl, 2),
+        "total_trades": len(TRADES),
+        "winning_trades": sum(1 for t in TRADES if t.get('pnl', 0) > 0),
+        "losing_trades": sum(1 for t in TRADES if t.get('pnl', 0) < 0),
+    }
+
+
+@app.get("/api/v1/portfolio")
+async def portfolio_positions():
+    """Active positions — matches Flutter ApiService.getActivePositions()."""
     if exchange_testnet:
         try:
             balance = exchange_testnet.fetch_balance()
-            total = balance.get('total', {})
-            usdt_free = balance.get('USDT', {}).get('free', 0)
-            usdt_total = balance.get('USDT', {}).get('total', 0)
+            positions = []
             btc_total = balance.get('BTC', {}).get('total', 0)
-            # Get BTC price for value calculation
-            btc_ticker = exchange_public.fetch_ticker('BTC/USDT')
-            btc_price = btc_ticker['last']
-            total_value = usdt_total + (btc_total * btc_price)
-            return {
-                "total_value": round(total_value, 2),
-                "available_balance": round(usdt_free, 2),
-                "unrealized_pnl": 0,
-                "realized_pnl": 0,
-                "positions_count": len(POSITIONS),
-                "win_rate": 68.5,
-                "btc_balance": btc_total,
-                "mode": "testnet",
-                "exchange": "Binance Testnet",
-            }
-        except Exception as e:
-            return {"error": str(e), "mode": "testnet"}
-    
-    total = sum(VIRTUAL_BALANCE.values())
-    return {
-        "total_value": total,
-        "available_balance": VIRTUAL_BALANCE.get('USDT', 0),
-        "mode": "demo",
-    }
-
-@app.get("/api/v1/portfolio/positions")
-async def portfolio_positions():
+            if btc_total and btc_total > 0:
+                btc_ticker = exchange_public.fetch_ticker('BTC/USDT')
+                btc_price = btc_ticker['last']
+                positions.append({
+                    "symbol": "BTC/USDT",
+                    "side": "long",
+                    "quantity": btc_total,
+                    "entry_price": btc_price,
+                    "current_price": btc_price,
+                    "unrealized_pnl": 0,
+                    "unrealized_pnl_pct": 0,
+                    "weight_pct": 100,
+                })
+            return positions
+        except Exception:
+            pass
     return POSITIONS
+
+
+@app.get("/api/v1/portfolio/summary")
+async def portfolio_summary():
+    """Legacy endpoint — keep for backward compat."""
+    return await portfolio_pnl()
 
 
 # ─── Trades ────────────────────────────────────────────────
 
 class OrderRequest(BaseModel):
-    symbol: str  # e.g. "BTC/USDT"
-    side: str  # "buy" or "sell"
-    amount: float  # quantity
-    price: Optional[float] = None  # limit price, None for market
-    order_type: str = "market"  # "market" or "limit"
+    symbol: str
+    side: str
+    amount: float
+    price: Optional[float] = None
+    order_type: str = "market"
+
 
 @app.get("/api/v1/trades")
-async def get_trades(page: int = 1, limit: int = 50):
-    return TRADES[-limit:]
+async def get_trades(page: int = 1, limit: int = 50, page_size: int = 50):
+    """Trade history — matches Flutter ApiService.getTrades().
+    Returns {trades: [...]} format.
+    """
+    actual_limit = min(limit, page_size)
+    return {"trades": TRADES[-actual_limit:]}
+
+
+@app.get("/api/v1/trades/{trade_id}")
+async def get_trade(trade_id: str):
+    """Single trade — matches Flutter ApiService.getTrade()."""
+    for t in TRADES:
+        if t.get('id') == trade_id:
+            return t
+    raise HTTPException(status_code=404, detail="Trade not found")
+
 
 @app.post("/api/v1/trades")
 async def create_order(req: OrderRequest):
     """Execute a trade on Binance testnet."""
     if not exchange_testnet:
-        raise HTTPException(status_code=400, detail="API keys not configured. Go to Settings → API Keys first.")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="API keys not configured. Go to Settings → API Keys first."
+        )
+
     try:
         if req.order_type == "market":
             order = exchange_testnet.create_order(
@@ -214,19 +303,25 @@ async def create_order(req: OrderRequest):
                 amount=req.amount,
                 price=req.price,
             )
-        
+
         trade = {
-            "id": order['id'],
+            "id": order.get('id', str(uuid.uuid4())[:8]),
             "symbol": req.symbol,
             "side": req.side,
             "status": order.get('status', 'open'),
             "entry_price": order.get('average', order.get('price', 0)),
+            "exit_price": None,
             "quantity": req.amount,
             "pnl": 0,
+            "stop_loss": None,
+            "take_profit": None,
+            "strategy_id": "manual",
             "opened_at": datetime.now().isoformat(),
+            "closed_at": None,
+            "notes": "",
         }
         TRADES.append(trade)
-        
+
         return {
             "status": "success",
             "order": order,
@@ -238,33 +333,28 @@ async def create_order(req: OrderRequest):
 
 # ─── Market Data Endpoints ─────────────────────────────────
 
-@app.get("/api/v1/market/ticker/{symbol}")
+@app.get("/api/v1/market/ticker/{symbol:path}")
 async def market_ticker(symbol: str):
-    """Get live price for a symbol. symbol format: BTC/USDT"""
     return await get_ticker(symbol)
+
 
 @app.get("/api/v1/market/tickers")
 async def market_tickers():
-    """Get live prices for top pairs."""
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'LINK/USDT', 'ADA/USDT']
     return await get_tickers(symbols)
 
-@app.get("/api/v1/market/orderbook/{symbol}")
+
+@app.get("/api/v1/market/orderbook/{symbol:path}")
 async def market_orderbook(symbol: str, limit: int = 10):
-    """Get order book."""
     try:
         ob = exchange_public.fetch_order_book(symbol, limit)
-        return {
-            "symbol": symbol,
-            "bids": ob['bids'][:limit],
-            "asks": ob['asks'][:limit],
-        }
+        return {"symbol": symbol, "bids": ob['bids'][:limit], "asks": ob['asks'][:limit]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/api/v1/market/candles/{symbol}")
+
+@app.get("/api/v1/market/candles/{symbol:path}")
 async def market_candles(symbol: str, timeframe: str = "1h", limit: int = 100):
-    """Get OHLCV candles."""
     try:
         candles = exchange_public.fetch_ohlcv(symbol, timeframe, limit=limit)
         return {
@@ -281,19 +371,18 @@ async def market_candles(symbol: str, timeframe: str = "1h", limit: int = 100):
 
 # ─── Signals ───────────────────────────────────────────────
 
-@app.get("/api/v1/signals/active")
-async def active_signals():
-    """Generate signals based on live market data."""
+async def _generate_signals():
+    """Generate signals from live market data."""
     signals = []
     try:
         for sym in ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']:
             ticker = await get_ticker(sym)
             price = ticker.get('price', 0)
             change = ticker.get('change_24h', 0)
-            
+
             direction = "long" if change > 0 else "short"
             strength = "strong" if abs(change) > 3 else "moderate" if abs(change) > 1 else "weak"
-            
+
             signals.append({
                 "id": f"sig-{sym.replace('/', '-')}",
                 "symbol": sym,
@@ -310,13 +399,33 @@ async def active_signals():
                 "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
                 "is_active": True,
             })
-    except:
+    except Exception:
         pass
     return signals
 
+
 @app.get("/api/v1/signals")
-async def get_signals(page: int = 1, limit: int = 50):
-    return await active_signals()
+async def get_signals(page: int = 1, limit: int = 50, page_size: int = 50):
+    """Active signals — matches Flutter ApiService.getActiveSignals().
+    Returns {signals: [...]} format.
+    """
+    signals = await _generate_signals()
+    return {"signals": signals}
+
+
+@app.get("/api/v1/signals/active")
+async def active_signals():
+    """Legacy endpoint."""
+    return await _generate_signals()
+
+
+@app.get("/api/v1/signals/history")
+async def signals_history(page: int = 1, limit: int = 50, page_size: int = 50):
+    """Signal history — matches Flutter ApiService.getSignals().
+    Returns {signals: [...]} format.
+    """
+    signals = await _generate_signals()
+    return {"signals": signals}
 
 
 # ─── Analytics ─────────────────────────────────────────────
@@ -333,6 +442,23 @@ async def performance(period: str = "30d"):
         "max_drawdown": 5.0,
     }
 
+
+@app.get("/api/v1/analytics/pnl-history")
+async def pnl_history(period: str = "30d"):
+    """P&L history for charts — matches Flutter ApiService.getPnlHistory()."""
+    history = []
+    now = datetime.now()
+    for i in range(30):
+        day = now - timedelta(days=29 - i)
+        history.append({
+            "date": day.strftime("%Y-%m-%d"),
+            "pnl": 0,
+            "cumulative_pnl": 0,
+            "trades": 0,
+        })
+    return history
+
+
 @app.get("/api/v1/analytics/risk")
 async def risk_metrics():
     return {
@@ -344,6 +470,22 @@ async def risk_metrics():
         "max_positions": 5,
         "exposure_pct": 0,
         "correlation_risk": "low",
+    }
+
+
+@app.get("/api/v1/analytics/win-rate")
+async def win_rate():
+    """Win rate analytics — matches Flutter ApiService.getWinRate()."""
+    total = len(TRADES)
+    winning = sum(1 for t in TRADES if t.get('pnl', 0) > 0)
+    return {
+        "total_trades": total,
+        "winning_trades": winning,
+        "losing_trades": total - winning,
+        "win_rate": (winning / total * 100) if total > 0 else 0,
+        "avg_win": 0,
+        "avg_loss": 0,
+        "profit_factor": 2.1,
     }
 
 
@@ -363,14 +505,13 @@ async def get_settings():
 @app.get("/health")
 async def health():
     try:
-        # Test Binance connection
         ticker = exchange_public.fetch_ticker('BTC/USDT')
         binance_ok = True
         btc_price = ticker['last']
-    except:
+    except Exception:
         binance_ok = False
         btc_price = 0
-    
+
     return {
         "status": "ok",
         "binance_connected": binance_ok,
@@ -386,10 +527,10 @@ async def health():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'LINK/USDT']
-    
+
     try:
         await websocket.send_json({"type": "connected", "data": {"message": "Live Binance feed"}})
-        
+
         while True:
             for sym in symbols:
                 try:
@@ -403,7 +544,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "volume": ticker.get('quoteVolume', 0),
                         }
                     })
-                except:
+                except Exception:
                     pass
                 await asyncio.sleep(0.5)
             await asyncio.sleep(1)
