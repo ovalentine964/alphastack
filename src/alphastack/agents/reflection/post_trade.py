@@ -312,6 +312,14 @@ class CorrectionEngine:
         },
     }
 
+    # Parameter bounds: (min, max) — prevents unbounded drift
+    _PARAM_BOUNDS: dict[str, tuple[float, float]] = {
+        "min_confluence_score": (0.1, 0.95),
+        "position_size_pct": (0.001, 0.1),
+        "entry_patience_bars": (1, 20),
+        "stop_loss_atr_mult": (0.5, 5.0),
+    }
+
     def __init__(self) -> None:
         self._corrections: list[Correction] = []
 
@@ -351,11 +359,18 @@ class CorrectionEngine:
             return None
 
         current = (current_params or {}).get(template["parameter"], 0)
+        new_value = current + template["delta"]
+
+        # Clamp to valid bounds to prevent unbounded parameter drift
+        bounds = self._PARAM_BOUNDS.get(template["parameter"])
+        if bounds:
+            new_value = max(bounds[0], min(bounds[1], new_value))
+
         correction = Correction(
             category=category,
             parameter=template["parameter"],
             old_value=current,
-            new_value=current + template["delta"],
+            new_value=new_value,
             reason=template["reason"],
             impact_score=abs(pnl) / max(abs(pnl) + 1.0, 1.0),  # bounded 0–1
         )

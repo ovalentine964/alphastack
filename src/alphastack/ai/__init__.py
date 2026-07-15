@@ -1,5 +1,30 @@
-"""AI reasoning layer — MiMo integration for AlphaStack."""
+"""AI reasoning layer — model-agnostic integration for AlphaStack.
 
-from alphastack.ai.mimo_client import MiMoClient, ReasoningEngine
+Primary interface (new code):
 
-__all__ = ["MiMoClient", "ReasoningEngine"]
+    from alphastack.ai import AlphaModel, ReasoningEngine
+
+Legacy interface (still works):
+
+    from alphastack.ai import MiMoClient, ReasoningEngine
+"""
+
+from alphastack.ai.model_client import (
+    AlphaModel,
+    ReasoningEngine,
+    detect_provider,
+    resolve_config,
+    PROVIDERS,
+)
+
+# Backward-compatible alias
+MiMoClient = AlphaModel
+
+__all__ = [
+    "AlphaModel",
+    "MiMoClient",
+    "ReasoningEngine",
+    "detect_provider",
+    "resolve_config",
+    "PROVIDERS",
+]

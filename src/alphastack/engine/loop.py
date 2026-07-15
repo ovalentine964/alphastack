@@ -133,6 +133,7 @@ class LoopState:
     cycle_count: int = 0
     last_trade_time: float = 0.0
     current_drawdown: float = 0.0
+    peak_pnl: float = 0.0  # Track peak P&L for drawdown calculation
     win_streak: int = 0
     cooldown_remaining: int = 0
     running: bool = False
@@ -146,6 +147,7 @@ class LoopState:
             "cycle_count": self.cycle_count,
             "last_trade_time": self.last_trade_time,
             "current_drawdown": round(self.current_drawdown, 4),
+            "peak_pnl": round(self.peak_pnl, 4),
             "win_streak": self.win_streak,
             "cooldown_remaining": self.cooldown_remaining,
             "running": self.running,
@@ -404,7 +406,7 @@ class TradingLoop:
             return True
         except Exception:
             logger.warning("loop.debate_error", exc_info=True)
-            return True  # Allow through on debate failure
+            return False  # Fail-closed: reject signal on debate failure
 
     def _pre_trade_reflect(
         self,
@@ -485,23 +487,26 @@ class TradingLoop:
             self.state.total_pnl += pnl
 
             if pnl > 0:
-                self.state.win_streak = (
-                    max(0, self.state.win_streak) + 1
-                )
+                if self.state.win_streak > 0:
+                    self.state.win_streak += 1
+                else:
+                    self.state.win_streak = 1
             elif pnl < 0:
-                self.state.win_streak = (
-                    min(0, self.state.win_streak) - 1
-                )
+                if self.state.win_streak < 0:
+                    self.state.win_streak -= 1
+                else:
+                    self.state.win_streak = -1
                 self.state.cooldown_remaining = self.config.cooldown_after_loss
 
-            # Update drawdown
-            if self.state.total_pnl < 0:
-                self.state.current_drawdown = abs(self.state.total_pnl)
-            else:
-                self.state.current_drawdown = max(
-                    0.0,
-                    self.state.current_drawdown - pnl,
+            # Update drawdown (peak-to-trough)
+            self.state.peak_pnl = max(self.state.peak_pnl, self.state.total_pnl)
+            if self.state.peak_pnl > 0:
+                self.state.current_drawdown = (
+                    (self.state.peak_pnl - self.state.total_pnl) / self.state.peak_pnl * 100
                 )
+            else:
+                self.state.current_drawdown = abs(self.state.total_pnl)
+            self.state.current_drawdown = max(0.0, self.state.current_drawdown)
 
         # Run post-trade reflection on completed trades
         try:

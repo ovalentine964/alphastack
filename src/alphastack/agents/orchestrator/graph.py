@@ -423,9 +423,15 @@ class AlphaStackOrchestrator:
             sig_sym = sig.get("symbol", "") if isinstance(sig, dict) else getattr(sig, "symbol", "")
             if sig_sym == entry.get("symbol", ""):
                 signal = sig if isinstance(sig, dict) else {
-                    "type": getattr(sig, "type", ""),
-                    "confidence": getattr(sig, "confidence", 0.5),
-                    "score": getattr(sig, "score", 0.5),
+                    "symbol": getattr(sig, "symbol", ""),
+                    "side": getattr(sig, "side", "flat"),
+                    "strength": getattr(sig, "strength", 0.0),
+                    "confluence_score": getattr(sig, "confluence_score", 0.0),
+                    "strategy": getattr(sig, "strategy", ""),
+                    "reasoning": getattr(sig, "reasoning", ""),
+                    "stop_loss": getattr(sig, "stop_loss", None),
+                    "take_profit": getattr(sig, "take_profit", None),
+                    "entry_price": getattr(sig, "entry_price", None),
                 }
                 break
 
@@ -472,10 +478,22 @@ class AlphaStackOrchestrator:
 
         summary = "\n".join(summary_lines)
 
-        # Use LangGraph interrupt to pause for human input
-        human_response = interrupt(summary)
+        # Use LangGraph interrupt to pause for human input (30s timeout)
+        try:
+            human_response = interrupt(summary)
+        except Exception:
+            logger.warning("orchestrator.human_review.timeout_or_error", exc_info=True)
+            s.human_feedback = "rejected"
+            for decision in s.trade_decisions:
+                if decision.status == "approved":
+                    decision.status = "rejected"
+                    decision.rejection_reason = "Human review timed out or failed"
+            s.add_agent_message("human", "Human review timed out — rejecting all trades")
+            out = _state_to_dict(s)
+            out["current_node"] = "human_review"
+            return out
 
-        # Process human feedback
+        # Process human feedback — REJECT on non-string input (fail-closed)
         if isinstance(human_response, str):
             feedback_lower = human_response.strip().lower()
             if feedback_lower in ("approve", "yes", "ok", "go", "proceed"):
@@ -490,7 +508,14 @@ class AlphaStackOrchestrator:
                 s.human_feedback = "rejected"
                 s.add_agent_message("human", f"Human rejected: {human_response}")
         else:
-            s.human_feedback = "approved"
+            # Fail-closed: non-string input (None, dict, etc.) → REJECT
+            logger.warning("orchestrator.human_review.non_string_input", type=type(human_response).__name__)
+            for decision in s.trade_decisions:
+                if decision.status == "approved":
+                    decision.status = "rejected"
+                    decision.rejection_reason = f"Invalid human review response type: {type(human_response).__name__}"
+            s.human_feedback = "rejected"
+            s.add_agent_message("human", "Human review received invalid response — rejecting all trades")
 
         out = _state_to_dict(s)
         out["current_node"] = "human_review"

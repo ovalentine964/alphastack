@@ -46,13 +46,29 @@ class TelegramConfig:
         self,
         bot_token: str | None = None,
         chat_id: str | None = None,
+        allowed_chat_ids: list[str] | None = None,
     ) -> None:
         self.bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
         self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+        # Parse allowed chat IDs from env (comma-separated)
+        if allowed_chat_ids is not None:
+            self.allowed_chat_ids = [str(cid) for cid in allowed_chat_ids]
+        else:
+            env_ids = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "")
+            self.allowed_chat_ids = [
+                cid.strip() for cid in env_ids.split(",") if cid.strip()
+            ]
 
     @property
     def is_configured(self) -> bool:
         return bool(self.bot_token and self.chat_id)
+
+    def is_authorized(self, chat_id: int | str) -> bool:
+        """Check if a chat ID is authorized to interact with the bot."""
+        if not self.allowed_chat_ids:
+            # No allowlist configured — fall back to primary chat_id only
+            return str(chat_id) == str(self.chat_id)
+        return str(chat_id) in self.allowed_chat_ids
 
 
 # ═══════════════════════════════════════════════════════════
@@ -218,9 +234,20 @@ class AlphaTelegramBot:
             except TelegramError as e:
                 logger.warning("telegram.send_failed: %s", e)
 
+    # ── Auth helper ──────────────────────────────────────────
+
+    def _check_auth(self, update: Update) -> bool:
+        """Check if the message sender is authorized. Returns True if OK."""
+        if not update.message or not update.message.chat_id:
+            return False
+        return self.config.is_authorized(update.message.chat_id)
+
     # ── Command Handlers ───────────────────────────────────
 
     async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         await update.message.reply_text(
             "🤖 *AlphaStack* — AI Trading System\n\n"
             "I'm Alpha, your AI trading assistant.\n"
@@ -229,6 +256,9 @@ class AlphaTelegramBot:
         )
 
     async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         await update.message.reply_text(
             "📋 *AlphaStack Commands*\n\n"
             "/status — System status (BTC price, pipeline, agents)\n"
@@ -243,6 +273,9 @@ class AlphaTelegramBot:
         )
 
     async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         lines = ["📊 *AlphaStack Status*\n"]
         # BTC price
         if self.exchange_public:
@@ -262,6 +295,9 @@ class AlphaTelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_portfolio(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         if not self.trade_store:
             await update.message.reply_text("⚠️ Trade store not available")
             return
@@ -286,6 +322,9 @@ class AlphaTelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_signals(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         signals: list[dict] = []
         if self._generate_signals:
             try:
@@ -312,6 +351,9 @@ class AlphaTelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_trades(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         if not self.trade_store:
             await update.message.reply_text("⚠️ Trade store not available")
             return
@@ -333,6 +375,9 @@ class AlphaTelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_explain(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         if not self.trade_store:
             await update.message.reply_text("⚠️ Trade store not available")
             return
@@ -365,6 +410,9 @@ class AlphaTelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_market(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         if not self.exchange_public:
             await update.message.reply_text("⚠️ Exchange not available")
             return
@@ -383,6 +431,9 @@ class AlphaTelegramBot:
 
     async def _cmd_fallback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Free-text message → Alpha reasoning response."""
+        if not self._check_auth(update):
+            await update.message.reply_text("⛔ Unauthorized.")
+            return
         user_msg = update.message.text
         # Simple contextual response (no external LLM call to keep it self-contained)
         await update.message.reply_text(

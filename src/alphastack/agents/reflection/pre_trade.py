@@ -285,11 +285,21 @@ class PreTradeReflection(AlphaStackAgent):
             size_factor = mods.get("size_factor", 1.0)
             sl_factor = mods.get("sl_factor", 1.0)
 
-            # Adjust stop loss (tighten)
+            # Adjust stop loss (tighten by reducing distance from price)
             sl = getattr(signal, "stop_loss", None)
-            if sl is not None:
-                new_sl = sl * sl_factor
+            entry = getattr(signal, "entry_price", None)
+            if sl is not None and entry is not None:
+                # Compute distance from entry, reduce it by sl_factor, then apply
+                distance = abs(entry - sl)
+                new_distance = distance * sl_factor
+                if sl < entry:
+                    new_sl = entry - new_distance  # Long: SL below entry
+                else:
+                    new_sl = entry + new_distance  # Short: SL above entry
                 object.__setattr__(signal, "stop_loss", round(new_sl, 6))
+            elif sl is not None:
+                # Fallback: no entry price, use proportional adjustment
+                object.__setattr__(signal, "stop_loss", round(sl * sl_factor, 6))
 
             # Store size factor for risk agent to pick up
             verdict["applied_modifications"] = {

@@ -1201,5 +1201,5 @@ if __name__ == "__main__":
     print("🎯 AGI Module: ✅ Episodic Memory + Trade Planner")
     print("📡 Event Bus: In-Memory (no Redis required)")
     print("🔒 Auth: JWT (production-grade)")
-    print("📋 Endpoints: auth, signals, trades, portfolio, analytics, market, agi, orchestrator, settings")
+    print("📋 Endpoints: auth, signals, trades, portfolio, analytics, market, agi, orchestrator, loop, settings")
     uvicorn.run(app, host="0.0.0.0", port=8000)
