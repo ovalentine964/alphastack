@@ -217,7 +217,7 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
     await api.autoAuthenticate();
 
     // Trigger connection status provider
-    ref.read(connectionStateProvider.notifier).connect();
+    ref.read(connectionStatusProvider.notifier).connect();
 
     if (mounted) setState(() => _ready = true);
   }

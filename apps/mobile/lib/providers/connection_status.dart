@@ -2,53 +2,53 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_service.dart';
 
-/// Connection lifecycle: disconnected → connecting → authenticated
-enum AppConnectionState { disconnected, connecting, authenticated }
+/// Connection lifecycle states.
+enum ConnectionStatus { disconnected, connecting, authenticated, connected, error }
 
 /// State class that holds connection info.
-class ConnectionStatus {
-  final AppConnectionState state;
+class ConnectionInfo {
+  final ConnectionStatus state;
   final String message;
   final bool isHealthy;
 
-  const ConnectionStatus({
+  const ConnectionInfo({
     required this.state,
     required this.message,
     this.isHealthy = false,
   });
 
-  ConnectionStatus copyWith({
-    AppConnectionState? state,
+  ConnectionInfo copyWith({
+    ConnectionStatus? state,
     String? message,
     bool? isHealthy,
   }) {
-    return ConnectionStatus(
+    return ConnectionInfo(
       state: state ?? this.state,
       message: message ?? this.message,
       isHealthy: isHealthy ?? this.isHealthy,
     );
   }
 
-  bool get isConnected => state == AppConnectionState.authenticated;
-  bool get isConnecting => state == AppConnectionState.connecting;
-  bool get isDisconnected => state == AppConnectionState.disconnected;
+  bool get isConnected => state == ConnectionStatus.authenticated || state == ConnectionStatus.connected;
+  bool get isConnecting => state == ConnectionStatus.connecting;
+  bool get isDisconnected => state == ConnectionStatus.disconnected;
 }
 
 /// Notifier that manages the app connection lifecycle.
-class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
+class ConnectionStatusNotifier extends StateNotifier<ConnectionInfo> {
   final ApiService _api;
   Timer? _healthTimer;
 
   ConnectionStatusNotifier(this._api)
-      : super(const ConnectionStatus(
-          state: AppConnectionState.disconnected,
+      : super(const ConnectionInfo(
+          state: ConnectionStatus.disconnected,
           message: 'Not connected',
         ));
 
   /// Check health and authenticate if needed.
   Future<void> connect() async {
     state = state.copyWith(
-      state: AppConnectionState.connecting,
+      state: ConnectionStatus.connecting,
       message: 'Connecting...',
     );
 
@@ -56,8 +56,8 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
       // Step 1: Check backend health
       final healthy = await _api.checkHealth();
       if (!healthy) {
-        state = const ConnectionStatus(
-          state: AppConnectionState.disconnected,
+        state = const ConnectionInfo(
+          state: ConnectionStatus.disconnected,
           message: 'Backend unreachable',
           isHealthy: false,
         );
@@ -70,7 +70,7 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
 
       // Step 3: Authenticate (with stored keys or demo credentials)
       state = state.copyWith(
-        state: AppConnectionState.connecting,
+        state: ConnectionStatus.connecting,
         message: 'Authenticating...',
         isHealthy: true,
       );
@@ -78,21 +78,21 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
       final authSuccess = await _api.autoAuthenticate();
 
       if (authSuccess) {
-        state = const ConnectionStatus(
-          state: AppConnectionState.authenticated,
+        state = const ConnectionInfo(
+          state: ConnectionStatus.authenticated,
           message: 'Connected',
           isHealthy: true,
         );
       } else {
-        state = const ConnectionStatus(
-          state: AppConnectionState.disconnected,
+        state = const ConnectionInfo(
+          state: ConnectionStatus.disconnected,
           message: 'Authentication failed',
           isHealthy: true,
         );
       }
     } catch (e) {
-      state = ConnectionStatus(
-        state: AppConnectionState.disconnected,
+      state = ConnectionInfo(
+        state: ConnectionStatus.disconnected,
         message: 'Connection error: $e',
         isHealthy: false,
       );
@@ -102,8 +102,8 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
   /// Disconnect and clear auth state.
   Future<void> disconnect() async {
     await _api.clearAuth();
-    state = const ConnectionStatus(
-      state: AppConnectionState.disconnected,
+    state = const ConnectionInfo(
+      state: ConnectionStatus.disconnected,
       message: 'Disconnected',
     );
   }
@@ -112,11 +112,11 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
   void startHealthMonitor() {
     _healthTimer?.cancel();
     _healthTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (state.state == AppConnectionState.authenticated) {
+      if (state.state == ConnectionStatus.authenticated) {
         final healthy = await _api.checkHealth();
         if (!healthy) {
           state = state.copyWith(
-            state: AppConnectionState.disconnected,
+            state: ConnectionStatus.disconnected,
             message: 'Connection lost',
             isHealthy: false,
           );
@@ -138,8 +138,8 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionStatus> {
 }
 
 /// Global connection status provider.
-final connectionStateProvider =
-    StateNotifierProvider<ConnectionStatusNotifier, ConnectionStatus>((ref) {
+final connectionStatusProvider =
+    StateNotifierProvider<ConnectionStatusNotifier, ConnectionInfo>((ref) {
   final notifier = ConnectionStatusNotifier(ApiService());
   // Auto-connect on creation
   notifier.connect();

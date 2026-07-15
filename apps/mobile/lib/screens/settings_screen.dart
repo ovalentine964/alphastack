@@ -2,12 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app.dart';
 import '../services/api_service.dart';
+import '../providers/app_preferences.dart';
 import 'api_keys_screen.dart';
-
-final biometricEnabledProvider = StateProvider<bool>((ref) => false);
-final notificationsEnabledProvider = StateProvider<bool>((ref) => true);
-final darkModeProvider = StateProvider<bool>((ref) => true);
-final autoRefreshProvider = StateProvider<bool>((ref) => true);
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -92,7 +88,7 @@ class SettingsScreen extends ConsumerWidget {
             trailing: Switch(
               value: autoRefresh,
               onChanged: (v) =>
-                  ref.read(autoRefreshProvider.notifier).state = v,
+                  ref.read(autoRefreshProvider.notifier).set(v),
               activeColor: AlphaStackApp.accentBlue,
             ),
           ),
@@ -108,7 +104,7 @@ class SettingsScreen extends ConsumerWidget {
             trailing: Switch(
               value: biometric,
               onChanged: (v) =>
-                  ref.read(biometricEnabledProvider.notifier).state = v,
+                  ref.read(biometricEnabledProvider.notifier).set(v),
               activeColor: AlphaStackApp.accentBlue,
             ),
           ),
@@ -142,7 +138,7 @@ class SettingsScreen extends ConsumerWidget {
             trailing: Switch(
               value: notifications,
               onChanged: (v) =>
-                  ref.read(notificationsEnabledProvider.notifier).state = v,
+                  ref.read(notificationsEnabledProvider.notifier).set(v),
               activeColor: AlphaStackApp.accentBlue,
             ),
           ),

@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app.dart';
 import '../services/api_service.dart';
-
-/// Connection status for the API keys screen.
-enum ConnectionStatus { idle, checking, connected, error }
+import '../providers/connection_status.dart';
 
 /// Provider that tracks whether API keys are configured.
 final apiKeysConfiguredProvider = FutureProvider<bool>((ref) async {
@@ -12,9 +10,9 @@ final apiKeysConfiguredProvider = FutureProvider<bool>((ref) async {
   return await api.hasStoredKeys();
 });
 
-/// Provider for the connection status check.
-final connectionStatusProvider =
-    StateProvider<ConnectionStatus>((ref) => ConnectionStatus.idle);
+/// Local provider for the API keys screen connection check.
+final apiKeysConnectionProvider =
+    StateProvider<ConnectionStatus>((ref) => ConnectionStatus.disconnected);
 
 /// Provider for connection status message.
 final connectionMessageProvider = StateProvider<String>((ref) => '');
@@ -76,8 +74,8 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    ref.read(connectionStatusProvider.notifier).state =
-        ConnectionStatus.checking;
+    ref.read(apiKeysConnectionProvider.notifier).state =
+        ConnectionStatus.connecting;
     ref.read(connectionMessageProvider.notifier).state = 'Saving keys...';
 
     try {
@@ -114,12 +112,12 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
       final healthy = await api.checkHealth();
 
       if (healthy) {
-        ref.read(connectionStatusProvider.notifier).state =
+        ref.read(apiKeysConnectionProvider.notifier).state =
             ConnectionStatus.connected;
         ref.read(connectionMessageProvider.notifier).state =
             'Connected to backend successfully';
       } else {
-        ref.read(connectionStatusProvider.notifier).state =
+        ref.read(apiKeysConnectionProvider.notifier).state =
             ConnectionStatus.error;
         ref.read(connectionMessageProvider.notifier).state =
             'Keys saved, but backend is unreachable. It will connect when available.';
@@ -142,7 +140,7 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
       // Notify parent (first-launch flow)
       widget.onSaved?.call();
     } catch (e) {
-      ref.read(connectionStatusProvider.notifier).state =
+      ref.read(apiKeysConnectionProvider.notifier).state =
           ConnectionStatus.error;
       ref.read(connectionMessageProvider.notifier).state = 'Error: $e';
 
@@ -161,8 +159,8 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
 
   Future<void> _testConnection() async {
     setState(() => _isLoading = true);
-    ref.read(connectionStatusProvider.notifier).state =
-        ConnectionStatus.checking;
+    ref.read(apiKeysConnectionProvider.notifier).state =
+        ConnectionStatus.connecting;
     ref.read(connectionMessageProvider.notifier).state =
         'Testing connection...';
 
@@ -171,18 +169,18 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
       final healthy = await api.checkHealth();
 
       if (healthy) {
-        ref.read(connectionStatusProvider.notifier).state =
+        ref.read(apiKeysConnectionProvider.notifier).state =
             ConnectionStatus.connected;
         ref.read(connectionMessageProvider.notifier).state =
             'Backend is reachable and healthy';
       } else {
-        ref.read(connectionStatusProvider.notifier).state =
+        ref.read(apiKeysConnectionProvider.notifier).state =
             ConnectionStatus.error;
         ref.read(connectionMessageProvider.notifier).state =
             'Backend is not responding';
       }
     } catch (e) {
-      ref.read(connectionStatusProvider.notifier).state =
+      ref.read(apiKeysConnectionProvider.notifier).state =
           ConnectionStatus.error;
       ref.read(connectionMessageProvider.notifier).state = 'Error: $e';
     } finally {
@@ -192,7 +190,7 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final connStatus = ref.watch(connectionStatusProvider);
+    final connStatus = ref.watch(apiKeysConnectionProvider);
     final connMessage = ref.watch(connectionMessageProvider);
 
     return Scaffold(
@@ -266,16 +264,17 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
     String title;
 
     switch (status) {
-      case ConnectionStatus.idle:
+      case ConnectionStatus.disconnected:
         bgColor = AlphaStackApp.cardDark;
         borderColor = AlphaStackApp.borderDark;
         icon = Icons.info_outline;
         title = 'Configure your API keys to get started';
-      case ConnectionStatus.checking:
+      case ConnectionStatus.connecting:
         bgColor = AlphaStackApp.cardDark;
         borderColor = AlphaStackApp.accentBlue.withAlpha(100);
         icon = Icons.sync_rounded;
         title = 'Checking connection...';
+      case ConnectionStatus.authenticated:
       case ConnectionStatus.connected:
         bgColor = AlphaStackApp.accentGreen.withAlpha(20);
         borderColor = AlphaStackApp.accentGreen.withAlpha(80);
@@ -297,7 +296,7 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
       ),
       child: Row(
         children: [
-          if (status == ConnectionStatus.checking)
+          if (status == ConnectionStatus.connecting)
             const SizedBox(
               width: 24,
               height: 24,
