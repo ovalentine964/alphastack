@@ -444,7 +444,7 @@ async def lifespan(app: FastAPI):
     logger.info("api_shutdown")
 
 
-app = FastAPI(title="AlphaStack API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="AlphaStack API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
@@ -969,7 +969,7 @@ async def health():
         binance_ok = False
         btc_price = 0
     return {
-        "status": "ok", "version": "3.0.0",
+        "status": "ok", "version": "0.1.0",
         "uptime_seconds": round(time.time() - _START_TIME, 2),
         "binance_connected": binance_ok, "btc_price": btc_price,
         "testnet_configured": exchange_testnet is not None,
