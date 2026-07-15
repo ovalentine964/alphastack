@@ -26,6 +26,14 @@ jobs:
         working-directory: apps/mobile
         run: flutter analyze --no-fatal-infos
 
+      - name: Setup signing keystore
+        working-directory: apps/mobile/android/app
+        run: |
+          echo "KEYSTORE_PATH=${{ github.workspace }}/apps/mobile/android/app/release.keystore" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=alphastack123" >> $GITHUB_ENV
+          echo "KEY_ALIAS=alphastack" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=alphastack123" >> $GITHUB_ENV
+
       - name: Build Release APK
         working-directory: apps/mobile
         run: flutter build apk --release
