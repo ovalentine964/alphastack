@@ -101,9 +101,16 @@ exchange_public = ccxt.binance({
     'options': {'defaultType': 'spot'},
 })
 
+# ─── Encoding safety: strip non-ASCII chars that break latin-1 codec ───
+def _sanitize_str(val: str) -> str:
+    """Remove non-ASCII characters (e.g. U+2026 ellipsis) that cause
+    ccxt/requests HMAC signing to fail with latin-1 codec error."""
+    return val.encode('ascii', 'ignore').decode('ascii')
+
+
 # Testnet for trading
-BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
-BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
+BINANCE_API_KEY = _sanitize_str(os.environ.get("BINANCE_API_KEY", ""))
+BINANCE_API_SECRET = _sanitize_str(os.environ.get("BINANCE_API_SECRET", ""))
 exchange_testnet = None
 if BINANCE_API_KEY and BINANCE_API_SECRET:
     exchange_testnet = ccxt.binance({
@@ -172,7 +179,7 @@ def _compute_atr(highs, lows, closes, period=14):
 
 
 def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
-    return exchange_public.fetch_ohlcv(symbol, timeframe, limit=limit)
+    return exchange_public.fetch_ohlcv(_sanitize_str(symbol), timeframe, limit=limit)
 
 
 def _build_market_data(symbol: str) -> dict[str, Any]:
@@ -620,8 +627,10 @@ async def create_trade(body: TradeCreate):
     # Also try to execute on testnet if available
     if exchange_testnet and body.price is None:
         try:
+            # Sanitize symbol to prevent encoding errors in request signing
+            safe_symbol = _sanitize_str(body.symbol)
             order = exchange_testnet.create_order(
-                symbol=body.symbol, type='market', side=body.side, amount=body.quantity,
+                symbol=safe_symbol, type='market', side=body.side, amount=body.quantity,
             )
             trade["broker_order_id"] = order.get("id", "")
             trade["status"] = "open"

@@ -2,50 +2,44 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../app.dart';
+import '../services/api_service.dart';
 import '../widgets/pnl_chart.dart';
 
 final analyticsPeriodProvider = StateProvider<String>((ref) => '30d');
 
 final performanceProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 500));
-  return {
-    'totalTrades': 156,
-    'winRate': 68.5,
-    'profitFactor': 2.14,
-    'sharpeRatio': 1.87,
-    'maxDrawdown': -8.3,
-    'avgWin': 425.50,
-    'avgLoss': -198.20,
-    'bestTrade': 1250.00,
-    'worstTrade': -580.00,
-    'totalPnl': 18420.75,
-    'consecutiveWins': 8,
-    'consecutiveLosses': 3,
-  };
+  final period = ref.watch(analyticsPeriodProvider);
+  return await ApiService().getPerformanceAnalytics(period: period);
 });
 
 final pnlHistoryProvider = FutureProvider<List<PnlDataPoint>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 600));
-  final now = DateTime.now();
-  return List.generate(30, (i) {
-    final base = 100000 + (i * 300.0);
-    final noise = (i % 3 == 0 ? -1 : 1) * (i * 50.0);
-    return PnlDataPoint(
-      date: now.subtract(Duration(days: 30 - i)),
-      value: base + noise + (i * i * 2.0),
-    );
-  });
+  final period = ref.watch(analyticsPeriodProvider);
+  final data = await ApiService().getPnlHistory(period: period);
+  return data.map((e) => PnlDataPoint(
+    date: DateTime.parse(e['date'] as String),
+    value: (e['value'] as num).toDouble(),
+  )).toList();
 });
 
 final winRateHistoryProvider = FutureProvider<List<WinRatePoint>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 700));
-  return List.generate(10, (i) {
-    return WinRatePoint(
-      label: 'W${i + 1}',
-      winRate: 55 + (i * 1.5) + (i % 2 == 0 ? 5 : -3),
-      trades: 12 + (i % 4),
-    );
-  });
+  final data = await ApiService().getWinRate();
+  final history = data['history'] as List? ?? [];
+  return history.map((e) => WinRatePoint(
+    label: e['label'] as String? ?? '',
+    winRate: (e['win_rate'] as num?)?.toDouble() ?? 0,
+    trades: (e['trades'] as num?)?.toInt() ?? 0,
+  )).toList();
+});
+
+final strategyBreakdownProvider = FutureProvider<List<_StrategyData>>((ref) async {
+  final data = await ApiService().getPerformanceAnalytics();
+  final strategies = data['strategies'] as List? ?? [];
+  return strategies.map((e) => _StrategyData(
+    e['name'] as String? ?? 'Unknown',
+    (e['trades'] as num?)?.toInt() ?? 0,
+    (e['win_rate'] as num?)?.toDouble() ?? 0,
+    (e['pnl'] as num?)?.toDouble() ?? 0,
+  )).toList();
 });
 
 class AnalyticsScreen extends ConsumerWidget {
@@ -56,6 +50,7 @@ class AnalyticsScreen extends ConsumerWidget {
     final performance = ref.watch(performanceProvider);
     final pnlHistory = ref.watch(pnlHistoryProvider);
     final winRateHistory = ref.watch(winRateHistoryProvider);
+    final strategyBreakdown = ref.watch(strategyBreakdownProvider);
     final period = ref.watch(analyticsPeriodProvider);
 
     return Scaffold(
@@ -112,7 +107,11 @@ class AnalyticsScreen extends ConsumerWidget {
           const SizedBox(height: 16),
 
           // Strategy Breakdown
-          _buildStrategyBreakdown(context),
+          strategyBreakdown.when(
+            data: (data) => _buildStrategyBreakdown(context, data),
+            loading: () => _buildSkeleton(height: 200),
+            error: (e, _) => _buildError('Strategy Breakdown', e),
+          ),
           const SizedBox(height: 16),
 
           // Risk Metrics
@@ -304,14 +303,8 @@ class AnalyticsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildStrategyBreakdown(BuildContext context) {
+  Widget _buildStrategyBreakdown(BuildContext context, List<_StrategyData> strategies) {
     final theme = Theme.of(context);
-    final strategies = [
-      _StrategyData('Trend Following', 45, 72.5, 8420.50),
-      _StrategyData('Mean Reversion', 38, 65.8, 5230.25),
-      _StrategyData('Breakout', 42, 62.3, 3150.00),
-      _StrategyData('Reversal', 31, 58.1, 1620.00),
-    ];
 
     return Container(
       padding: const EdgeInsets.all(16),

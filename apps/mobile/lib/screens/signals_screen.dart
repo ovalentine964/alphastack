@@ -212,10 +212,6 @@ class SignalsScreen extends ConsumerWidget {
 
   Widget _buildFilterBar(BuildContext context, WidgetRef ref,
       List<Signal> active, SignalFilters current) {
-    // Extract available pairs and timeframes from signals
-        active.map((s) => s.timeframe).whereType<String>().toSet().toList()
-          ..sort();
-
     return Container(
       height: 50,
       margin: const EdgeInsets.only(top: 8),

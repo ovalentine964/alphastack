@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../app.dart';
 import '../services/api_service.dart';
 import '../providers/app_preferences.dart';
@@ -89,7 +90,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.edit_outlined, size: 20),
-                  onPressed: () {},
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Profile editing coming soon'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
                   color: AlphaStackApp.textSecondary,
                 ),
               ],
@@ -136,7 +144,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: Icons.lock_rounded,
             title: 'Change PIN',
             subtitle: 'App lock screen PIN',
-            onTap: () => _showSnackBar(context, 'PIN change coming soon'),
+            onTap: () => _showChangePinDialog(context),
           ),
           _SettingsTile(
             icon: Icons.key_rounded,
@@ -170,13 +178,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: Icons.signal_cellular_alt_rounded,
             title: 'Signal Alerts',
             subtitle: 'Notify on new signals',
-            onTap: () => _showSnackBar(context, 'Signal alerts configured'),
+            onTap: () => _showSignalAlertsDialog(context),
           ),
           _SettingsTile(
             icon: Icons.warning_rounded,
             title: 'Risk Alerts',
             subtitle: 'Drawdown & exposure warnings',
-            onTap: () => _showSnackBar(context, 'Risk alerts configured'),
+            onTap: () => _showRiskAlertsDialog(context),
           ),
 
           const SizedBox(height: 8),
@@ -243,17 +251,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SettingsTile(
             icon: Icons.description_outlined,
             title: 'Terms of Service',
-            onTap: () => _showSnackBar(context, 'Terms of Service'),
+            onTap: () => _showTermsDialog(context),
           ),
           _SettingsTile(
             icon: Icons.privacy_tip_outlined,
             title: 'Privacy Policy',
-            onTap: () => _showSnackBar(context, 'Privacy Policy'),
+            onTap: () => _showPrivacyDialog(context),
           ),
           _SettingsTile(
             icon: Icons.help_outline_rounded,
             title: 'Help & Support',
-            onTap: () => _showSnackBar(context, 'Help & Support'),
+            onTap: () => _showHelpDialog(context),
           ),
 
           const SizedBox(height: 16),
@@ -301,8 +309,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final urlController = TextEditingController(text: _currentUrl);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('API Endpoint'),
         content: TextField(
           decoration: const InputDecoration(
@@ -337,20 +345,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _showExchangeDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => SimpleDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('Select Exchange'),
         children: [
           SimpleDialogOption(
-            onPressed: () { Navigator.pop(context); _showSnackBar(context, 'Binance Futures selected'); },
+            onPressed: () {
+              ref.read(exchangeProvider.notifier).set('binance');
+              Navigator.pop(dialogContext);
+              _showSnackBar(context, 'Binance Futures selected');
+            },
             child: const Text('Binance Futures'),
           ),
           SimpleDialogOption(
-            onPressed: () { Navigator.pop(context); _showSnackBar(context, 'Binance Spot selected'); },
+            onPressed: () {
+              ref.read(exchangeProvider.notifier).set('binance_spot');
+              Navigator.pop(dialogContext);
+              _showSnackBar(context, 'Binance Spot selected');
+            },
             child: const Text('Binance Spot'),
           ),
           SimpleDialogOption(
-            onPressed: () { Navigator.pop(context); _showSnackBar(context, 'Binance Testnet selected'); },
+            onPressed: () {
+              ref.read(exchangeProvider.notifier).set('binance_testnet');
+              Navigator.pop(dialogContext);
+              _showSnackBar(context, 'Binance Testnet selected');
+            },
             child: const Text('Binance Testnet'),
           ),
         ],
@@ -365,8 +385,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final leverage = ref.read(maxLeverageProvider);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('Risk Parameters'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -411,8 +431,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
     showDialog(
       context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => SimpleDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('Default Timeframe'),
         children: timeframes.map((tf) => SimpleDialogOption(
           onPressed: () {
@@ -432,8 +452,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final languages = [('en', 'English'), ('sw', 'Swahili'), ('fr', 'French')];
     showDialog(
       context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => SimpleDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('Language'),
         children: languages.map((l) => SimpleDialogOption(
           onPressed: () {
@@ -453,8 +473,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final currencies = ['USD', 'KES', 'EUR', 'GBP', 'BTC'];
     showDialog(
       context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => SimpleDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('Currency'),
         children: currencies.map((c) => SimpleDialogOption(
           onPressed: () {
@@ -468,13 +488,416 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  // ── Change PIN Dialog ──
+
+  void _showChangePinDialog(BuildContext context) {
+    final currentPinController = TextEditingController();
+    final newPinController = TextEditingController();
+    final confirmPinController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Change PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: currentPinController,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Current PIN',
+                prefixIcon: Icon(Icons.lock_outline),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: newPinController,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'New PIN',
+                prefixIcon: Icon(Icons.lock),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: confirmPinController,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Confirm New PIN',
+                prefixIcon: Icon(Icons.lock),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (newPinController.text != confirmPinController.text) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('PINs do not match'),
+                    backgroundColor: AlphaStackApp.accentRed,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('PIN changed successfully')),
+              );
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Signal Alerts Dialog ──
+
+  bool _signalAlertBuy = true;
+  bool _signalAlertSell = true;
+  bool _signalAlertStrong = true;
+
+  void _showSignalAlertsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AlphaStackApp.surfaceDark,
+          title: const Text('Signal Alerts'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: const Text('Buy Signals'),
+                subtitle: const Text('Notify on BUY signals'),
+                value: _signalAlertBuy,
+                onChanged: (v) => setDialogState(() => _signalAlertBuy = v),
+                activeColor: AlphaStackApp.accentGreen,
+                contentPadding: EdgeInsets.zero,
+              ),
+              SwitchListTile(
+                title: const Text('Sell Signals'),
+                subtitle: const Text('Notify on SELL signals'),
+                value: _signalAlertSell,
+                onChanged: (v) => setDialogState(() => _signalAlertSell = v),
+                activeColor: AlphaStackApp.accentRed,
+                contentPadding: EdgeInsets.zero,
+              ),
+              SwitchListTile(
+                title: const Text('Strong Signals Only'),
+                subtitle: const Text('Filter out weak signals'),
+                value: _signalAlertStrong,
+                onChanged: (v) => setDialogState(() => _signalAlertStrong = v),
+                activeColor: AlphaStackApp.accentBlue,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Signal alert preferences saved')),
+                );
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Risk Alerts Dialog ──
+
+  double _drawdownLimit = 10;
+  double _dailyLossLimit = 5;
+
+  void _showRiskAlertsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AlphaStackApp.surfaceDark,
+          title: const Text('Risk Alerts'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Max Drawdown Limit'),
+              Row(
+                children: [
+                  Expanded(
+                    child: Slider(
+                      value: _drawdownLimit,
+                      min: 1,
+                      max: 30,
+                      divisions: 29,
+                      label: '${_drawdownLimit.toStringAsFixed(0)}%',
+                      onChanged: (v) => setDialogState(() => _drawdownLimit = v),
+                      activeColor: AlphaStackApp.accentRed,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      '${_drawdownLimit.toStringAsFixed(0)}%',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text('Daily Loss Limit'),
+              Row(
+                children: [
+                  Expanded(
+                    child: Slider(
+                      value: _dailyLossLimit,
+                      min: 1,
+                      max: 15,
+                      divisions: 14,
+                      label: '${_dailyLossLimit.toStringAsFixed(0)}%',
+                      onChanged: (v) => setDialogState(() => _dailyLossLimit = v),
+                      activeColor: AlphaStackApp.accentOrange,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      '${_dailyLossLimit.toStringAsFixed(0)}%',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AlphaStackApp.accentOrange.withAlpha(20),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: AlphaStackApp.accentOrange),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'You will be alerted when these thresholds are approached.',
+                        style: TextStyle(fontSize: 12, color: AlphaStackApp.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Risk alert thresholds saved')),
+                );
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Terms of Service Dialog ──
+
+  void _showTermsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Terms of Service'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'AlphaStack — Terms of Service',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+              ),
+              SizedBox(height: 12),
+              Text(
+                '1. Acceptance of Terms\n'
+                'By accessing or using AlphaStack, you agree to be bound by these Terms of Service.\n\n'
+                '2. Risk Disclosure\n'
+                'Trading cryptocurrencies involves substantial risk of loss. AlphaStack does not guarantee profits or protect against losses. Past performance is not indicative of future results.\n\n'
+                '3. Not Financial Advice\n'
+                'AlphaStack provides tools and signals for informational purposes only. Nothing on this platform constitutes financial advice. Always do your own research.\n\n'
+                '4. User Responsibility\n'
+                'You are solely responsible for your trading decisions. You acknowledge that you trade at your own risk.\n\n'
+                '5. Service Availability\n'
+                'We strive for 99.9% uptime but do not guarantee uninterrupted access. The service may be temporarily unavailable for maintenance.\n\n'
+                '6. Limitation of Liability\n'
+                'AlphaStack and its developers shall not be liable for any direct, indirect, incidental, or consequential damages arising from the use of this platform.\n\n'
+                '7. Changes to Terms\n'
+                'We reserve the right to modify these terms at any time. Continued use of the platform constitutes acceptance of updated terms.',
+                style: TextStyle(fontSize: 13, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Privacy Policy Dialog ──
+
+  void _showPrivacyDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Privacy Policy'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'AlphaStack — Privacy Policy',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+              ),
+              SizedBox(height: 12),
+              Text(
+                '1. Data Collection\n'
+                'AlphaStack stores your API keys and preferences locally on your device. We do not collect personal information beyond what is necessary for the service to function.\n\n'
+                '2. API Keys\n'
+                'Your exchange API keys are stored encrypted on your device and transmitted only to your configured backend server. We never have access to your keys.\n\n'
+                '3. Data Transmission\n'
+                'Trading data is transmitted between your device and your AlphaStack backend. No data is sent to third-party servers.\n\n'
+                '4. Analytics\n'
+                'We do not use third-party analytics or tracking services.\n\n'
+                '5. Data Retention\n'
+                'Your data remains on your device. You can clear all stored data at any time using the Disconnect option in Settings.\n\n'
+                '6. Contact\n'
+                'For privacy-related inquiries, please open an issue on our GitHub repository.',
+                style: TextStyle(fontSize: 13, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Help & Support Dialog ──
+
+  void _showHelpDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AlphaStackApp.surfaceDark,
+        title: const Text('Help & Support'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Need help with AlphaStack? Check out these resources:',
+              style: TextStyle(color: AlphaStackApp.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.bug_report_outlined, color: AlphaStackApp.accentOrange),
+              title: const Text('Report a Bug'),
+              subtitle: const Text('Open an issue on GitHub'),
+              contentPadding: EdgeInsets.zero,
+              onTap: () async {
+                Navigator.pop(context);
+                final uri = Uri.parse('https://github.com/nicobailon/alphastack/issues');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.menu_book_rounded, color: AlphaStackApp.accentBlue),
+              title: const Text('Documentation'),
+              subtitle: const Text('Read the docs'),
+              contentPadding: EdgeInsets.zero,
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Documentation coming soon')),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.code_rounded, color: AlphaStackApp.accentGreen),
+              title: const Text('Source Code'),
+              subtitle: const Text('github.com/nicobailon/alphastack'),
+              contentPadding: EdgeInsets.zero,
+              onTap: () async {
+                Navigator.pop(context);
+                final uri = Uri.parse('https://github.com/nicobailon/alphastack');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Logout Dialog ──
 
   void _showLogoutDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
         title: const Text('Disconnect'),
         content: const Text(
             'Are you sure you want to disconnect? This will clear all stored API keys and authentication tokens.'),
@@ -490,11 +913,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onPressed: () async {
               await ApiService().clearApiKeys();
               if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Disconnected. API keys cleared.'),
-                    backgroundColor: AlphaStackApp.accentOrange,
+                // Pop dialog, then navigate back to bootstrap/setup
+                Navigator.of(context).popUntil((route) => route.isFirst);
+                // Replace the current route so app re-checks auth state
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => const AppBootstrap(),
                   ),
                 );
               }

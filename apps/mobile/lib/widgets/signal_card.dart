@@ -175,9 +175,9 @@ class SignalCard extends StatelessWidget {
   }
 
   static String _formatPrice(double price) {
-    if (price >= 1000) return price.toStringAsFixed(2);
-    if (price >= 1) return price.toStringAsFixed(4);
-    return price.toStringAsFixed(6);
+    if (price >= 1000) return '\$${price.toStringAsFixed(2)}';
+    if (price >= 1) return '\$${price.toStringAsFixed(4)}';
+    return '\$${price.toStringAsFixed(6)}';
   }
 
   static Color _confluenceColor(double score) {
@@ -256,7 +256,7 @@ class _PriceLevel extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            '\$$value',
+            value,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: color ?? AlphaStackApp.textPrimary,
               fontWeight: FontWeight.w600,

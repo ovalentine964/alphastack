@@ -12,6 +12,9 @@ import 'services/update_service.dart';
 import 'providers/connection_status.dart';
 import 'providers/app_preferences.dart';
 
+/// Global tab index provider so any screen can navigate between tabs.
+final currentTabProvider = StateProvider<int>((ref) => 0);
+
 class AlphaStackApp extends ConsumerWidget {
   const AlphaStackApp({super.key});
 
@@ -45,7 +48,7 @@ class AlphaStackApp extends ConsumerWidget {
       title: 'AlphaStack',
       debugShowCheckedModeBanner: false,
       theme: isDark ? _buildDarkTheme() : _buildLightTheme(),
-      home: const _AppBootstrap(),
+      home: const AppBootstrap(),
     );
   }
 
@@ -184,11 +187,11 @@ class AlphaStackApp extends ConsumerWidget {
 
 /// Bootstrap widget that checks endpoint + auth on first launch.
 /// Shows endpoint setup → auto-authenticates → main app.
-class _AppBootstrap extends ConsumerStatefulWidget {
-  const _AppBootstrap();
+class AppBootstrap extends ConsumerStatefulWidget {
+  const AppBootstrap({super.key});
 
   @override
-  ConsumerState<_AppBootstrap> createState() => _AppBootstrapState();
+  ConsumerState<AppBootstrap> createState() => _AppBootstrapState();
 }
 
 class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
@@ -532,16 +535,14 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
   }
 }
 
-class MainNavigation extends StatefulWidget {
+class MainNavigation extends ConsumerStatefulWidget {
   const MainNavigation({super.key});
 
   @override
-  State<MainNavigation> createState() => _MainNavigationState();
+  ConsumerState<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
-  int _currentIndex = 0;
-
+class _MainNavigationState extends ConsumerState<MainNavigation> {
   final List<Widget> _screens = const [
     DashboardScreen(),
     TradesScreen(),
@@ -552,14 +553,15 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
+    final currentIndex = ref.watch(currentTabProvider);
     return Scaffold(
       body: IndexedStack(
-        index: _currentIndex,
+        index: currentIndex,
         children: _screens,
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        currentIndex: currentIndex,
+        onTap: (index) => ref.read(currentTabProvider.notifier).state = index,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_rounded),

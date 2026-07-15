@@ -186,7 +186,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             _SectionHeader(
               title: 'Active Positions',
               count: positions.valueOrNull?.length,
-              onViewAll: () {},
+              onViewAll: () {
+                ref.read(currentTabProvider.notifier).state = 1; // Trades tab
+              },
             ),
             const SizedBox(height: 8),
             positions.when(
@@ -216,7 +218,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             _SectionHeader(
               title: 'Recent Signals',
               count: signals.valueOrNull?.length,
-              onViewAll: () {},
+              onViewAll: () {
+                ref.read(currentTabProvider.notifier).state = 2; // Signals tab
+              },
             ),
             const SizedBox(height: 8),
             signals.when(
@@ -625,7 +629,7 @@ class _ConnectionBanner extends ConsumerWidget {
           ),
           TextButton(
             onPressed: () {
-              // Navigate to settings
+              ref.read(currentTabProvider.notifier).state = 4; // Settings tab
             },
             child: Text('Settings', style: TextStyle(color: textColor)),
           ),
@@ -663,14 +667,21 @@ class _OfflineIndicator extends StatelessWidget {
   }
 }
 
-class _NotificationButton extends StatelessWidget {
+class _NotificationButton extends ConsumerWidget {
   const _NotificationButton();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return IconButton(
       icon: const Icon(Icons.notifications_outlined),
-      onPressed: () {},
+      onPressed: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No new notifications'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      },
     );
   }
 }

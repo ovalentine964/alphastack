@@ -3,88 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../app.dart';
 import '../models/trade.dart';
+import '../services/api_service.dart';
 
 final tradesProvider = FutureProvider<List<Trade>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 600));
-  return [
-    Trade(
-      id: 't-001',
-      symbol: 'BTC/USDT',
-      side: TradeSide.long,
-      status: TradeStatus.closed,
-      entryPrice: 65200.00,
-      exitPrice: 67800.00,
-      quantity: 0.2,
-      pnl: 520.00,
-      strategyId: 'trend_following',
-      openedAt: DateTime.now().subtract(const Duration(days: 2)),
-      closedAt: DateTime.now().subtract(const Duration(days: 1)),
-    ),
-    Trade(
-      id: 't-002',
-      symbol: 'ETH/USDT',
-      side: TradeSide.long,
-      status: TradeStatus.closed,
-      entryPrice: 3450.00,
-      exitPrice: 3380.00,
-      quantity: 3.0,
-      pnl: -210.00,
-      strategyId: 'breakout',
-      openedAt: DateTime.now().subtract(const Duration(days: 3)),
-      closedAt: DateTime.now().subtract(const Duration(days: 2, hours: 12)),
-    ),
-    Trade(
-      id: 't-003',
-      symbol: 'SOL/USDT',
-      side: TradeSide.short,
-      status: TradeStatus.closed,
-      entryPrice: 180.00,
-      exitPrice: 165.50,
-      quantity: 50,
-      pnl: 725.00,
-      strategyId: 'mean_reversion',
-      openedAt: DateTime.now().subtract(const Duration(days: 5)),
-      closedAt: DateTime.now().subtract(const Duration(days: 4)),
-    ),
-    Trade(
-      id: 't-004',
-      symbol: 'AVAX/USDT',
-      side: TradeSide.long,
-      status: TradeStatus.closed,
-      entryPrice: 38.50,
-      exitPrice: 41.20,
-      quantity: 100,
-      pnl: 270.00,
-      strategyId: 'support_bounce',
-      openedAt: DateTime.now().subtract(const Duration(days: 7)),
-      closedAt: DateTime.now().subtract(const Duration(days: 6)),
-    ),
-    Trade(
-      id: 't-005',
-      symbol: 'BTC/USDT',
-      side: TradeSide.long,
-      status: TradeStatus.open,
-      entryPrice: 67250.00,
-      quantity: 0.15,
-      stopLoss: 65500.00,
-      takeProfit: 72000.00,
-      strategyId: 'trend_following',
-      openedAt: DateTime.now().subtract(const Duration(hours: 6)),
-    ),
-    Trade(
-      id: 't-006',
-      symbol: 'LINK/USDT',
-      side: TradeSide.long,
-      status: TradeStatus.closed,
-      entryPrice: 14.20,
-      exitPrice: 15.80,
-      quantity: 200,
-      pnl: 320.00,
-      strategyId: 'breakout',
-      openedAt: DateTime.now().subtract(const Duration(days: 10)),
-      closedAt: DateTime.now().subtract(const Duration(days: 9)),
-    ),
-  ];
+  return await ApiService().getTrades();
 });
 
 enum TradeFilter { all, open, closed, profitable, losing }
