@@ -87,6 +87,14 @@ class BrokerOrder(BaseModel):
     filled_at: datetime | None = None
     raw: dict[str, Any] = Field(default_factory=dict)  # Original broker response
 
+    # -- Forex-specific fields ----------------------------------------------
+    lot_size: float | None = None          # Forex lots (0.01, 0.1, 1.0, …)
+    pip_value: float | None = None         # Calculated pip value for this trade
+    spread_at_entry: float | None = None   # Spread in pips when order was placed
+    swap_rate: float | None = None         # Expected daily swap cost per lot
+    margin_required: float | None = None   # Margin needed for this order
+    contract_size: float | None = None     # Units per standard lot (100 000 for forex)
+
     @property
     def is_active(self) -> bool:
         return self.status in (OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED)
@@ -113,6 +121,10 @@ class BrokerPosition(BaseModel):
     realized_pnl: float = 0.0
     margin_used: float = 0.0
     leverage: float = 1.0
+    contract_size: float = 1.0   # Units per standard lot (100 000 for forex; 1.0 for crypto)
+    lot_size: float = 0.0        # Number of lots (for forex; 0.0 for crypto)
+    swap: float = 0.0            # Accumulated swap/rollover cost
+    spread_at_entry: float = 0.0 # Spread in pips when position was opened
     stop_loss: float | None = None
     take_profit: float | None = None
     open_time: datetime | None = None
@@ -121,7 +133,21 @@ class BrokerPosition(BaseModel):
 
     @property
     def notional_value(self) -> float:
+        """Notional value of the position.
+
+        For forex: ``lots × contract_size × price``
+        For crypto: ``quantity × price`` (contract_size defaults to 1.0)
+        """
+        if self.lot_size > 0:
+            return abs(self.lot_size * self.contract_size * self.current_price)
         return abs(self.quantity * self.current_price)
+
+    @property
+    def effective_leverage(self) -> float:
+        """Notional value divided by margin used (0 if no margin)."""
+        if self.margin_used <= 0:
+            return 0.0
+        return self.notional_value / self.margin_used
 
     @property
     def pnl_pct(self) -> float:
@@ -166,9 +192,14 @@ class BrokerTick(BaseModel):
     ask: float = 0.0
     last: float = 0.0
     volume: float = 0.0
-    spread: float = 0.0
+    spread: float = 0.0           # Spread in price units
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     raw: dict[str, Any] = Field(default_factory=dict)
+
+    # -- Forex-specific fields ----------------------------------------------
+    swap_long: float = 0.0         # Daily swap rate for long positions
+    swap_short: float = 0.0        # Daily swap rate for short positions
+    spread_pips: float = 0.0       # Spread converted to pips (set by connector)
 
     @property
     def mid(self) -> float:

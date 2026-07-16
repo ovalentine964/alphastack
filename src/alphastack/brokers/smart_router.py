@@ -14,6 +14,7 @@ from typing import Any
 import structlog
 
 from alphastack.brokers.base import BrokerConnector
+from alphastack.brokers.forex_utils import FOREX_SYMBOLS, get_symbol, spread_in_pips, spread_in_pips_pct
 from alphastack.brokers.models import BrokerBalance, BrokerOrder, BrokerTick, OrderSide, OrderType
 from alphastack.brokers.order_manager import OrderManager
 from alphastack.brokers.registry import BrokerRegistry
@@ -36,11 +37,16 @@ class RoutingCriteria:
     reliability_weight: float = 0.1   # Uptime / error rate
 
     # Constraints
-    max_spread: float | None = None
+    max_spread: float | None = None        # Max spread in price units
+    max_spread_pips: float | None = None   # Max spread in pips (forex)
     max_slippage_pct: float = 0.5
     require_connected: bool = True
     preferred_brokers: list[str] = field(default_factory=list)
     excluded_brokers: list[str] = field(default_factory=list)
+
+    # Forex-specific
+    include_swap_cost: bool = True     # Factor swap into routing cost
+    swap_cost_weight: float = 0.05     # Weight for swap cost in total score
 
 
 # ---------------------------------------------------------------------------
@@ -170,20 +176,53 @@ class SmartRouter:
             except Exception:
                 continue
 
+        # Normalise spreads for cross-asset comparison.
+        # For forex we convert to a percentage-of-price metric so that
+        # EUR/USD (0.00015 spread) and BTC/USDT ($0.50 spread) are on
+        # the same scale.
+        is_forex = self._is_forex(order.symbol)
+        spread_metrics: dict[str, float] = {}  # broker → normalised spread
+        for name, tick in tick_data.items():
+            if is_forex:
+                spread_metrics[name] = self._spread_as_pct(
+                    tick.spread, tick.mid or tick.last, order.symbol
+                )
+            else:
+                ref_price = tick.mid or tick.last or 1.0
+                spread_metrics[name] = tick.spread / ref_price if ref_price > 0 else 0.0
+
         # Score each broker
         for name, tick in tick_data.items():
             score = BrokerScore(broker=name, spread=tick.spread)
 
-            # Cost score (inverse of spread – lower spread = higher score)
-            max_spread = max(t.spread for t in tick_data.values()) or 1.0
-            score.cost_score = 1.0 - (tick.spread / max_spread) if max_spread > 0 else 1.0
+            # Cost score — uses normalised (percentage) spread so crypto
+            # and forex spreads are directly comparable.
+            norm_spread = spread_metrics.get(name, 0.0)
+            max_norm = max(spread_metrics.values()) if spread_metrics else 1.0
+            if max_norm > 0:
+                score.cost_score = 1.0 - (norm_spread / max_norm)
+            else:
+                score.cost_score = 1.0
+
+            # Swap cost adjustment (forex only) — lower daily swap cost
+            # earns a bonus.  Negative swap (paying) penalises the score.
+            if is_forex and criteria.include_swap_cost:
+                swap_long = tick.swap_long
+                swap_short = tick.swap_short
+                # Use the more favourable direction for the order side
+                swap_rate = swap_long if order.side == OrderSide.BUY else swap_short
+                # Normalise: clamp swap into [-1, 1] range (very rough)
+                swap_score = max(-1.0, min(1.0, 1.0 + swap_rate * 0.1))
+                swap_score = max(0.0, swap_score)  # Floor at 0
+            else:
+                swap_score = 1.0  # No swap adjustment for crypto
 
             # Fill quality score
             score.fill_score = self._fill_rates.get(name, 0.8)  # Default 80%
 
             # Latency score
             avg_latency = self._latencies.get(name, 100.0)
-            max_latency = max(self._latencies.values()) or 200.0
+            max_latency = max(self._latencies.values()) if self._latencies else 200.0
             score.latency_score = 1.0 - (avg_latency / max_latency) if max_latency > 0 else 1.0
 
             # Reliability score
@@ -195,24 +234,63 @@ class SmartRouter:
             if name in criteria.preferred_brokers:
                 score.reliability_score = min(1.0, score.reliability_score + 0.1)
 
-            # Weighted total
-            score.total_score = (
+            # Weighted total (swap cost is an additional modifier)
+            base_score = (
                 criteria.cost_weight * score.cost_score
                 + criteria.fill_quality_weight * score.fill_score
                 + criteria.latency_weight * score.latency_score
                 + criteria.reliability_weight * score.reliability_score
             )
+            score.total_score = base_score
+            if is_forex and criteria.include_swap_cost:
+                score.total_score += criteria.swap_cost_weight * swap_score
 
             # Apply constraints
+            score.available = True
             if criteria.max_spread and tick.spread > criteria.max_spread:
                 score.available = False
                 score.total_score = 0.0
+            if is_forex and criteria.max_spread_pips is not None:
+                pip_spread = self._spread_in_pips(tick.spread, order.symbol)
+                if pip_spread > criteria.max_spread_pips:
+                    score.available = False
+                    score.total_score = 0.0
 
             scores.append(score)
 
         # Sort descending
         scores.sort(key=lambda s: s.total_score, reverse=True)
         return [s for s in scores if s.available]
+
+    # -- metrics tracking ---------------------------------------------------
+
+    # -- forex helpers -------------------------------------------------------
+
+    @staticmethod
+    def _is_forex(symbol: str) -> bool:
+        """Check if the symbol is a known forex/metal instrument."""
+        return symbol in FOREX_SYMBOLS
+
+    @staticmethod
+    def _spread_in_pips(spread_raw: float, symbol: str) -> float:
+        """Convert raw spread to pips using the symbol's pip size."""
+        try:
+            fx = get_symbol(symbol)
+            return spread_in_pips(spread_raw, fx.pip_size)
+        except KeyError:
+            return spread_raw  # Non-forex: return raw
+
+    @staticmethod
+    def _spread_as_pct(spread_raw: float, price: float, symbol: str) -> float:
+        """Spread as a percentage of price — cross-asset normalised metric."""
+        if price <= 0:
+            return 0.0
+        try:
+            fx = get_symbol(symbol)
+            return spread_in_pips_pct(spread_raw / fx.pip_size, price, fx.pip_size)
+        except KeyError:
+            # Non-forex: compute directly
+            return spread_raw / price if price > 0 else 0.0
 
     # -- metrics tracking ---------------------------------------------------
 
@@ -233,6 +311,23 @@ class SmartRouter:
         """Record a latency measurement for *broker*."""
         prev = self._latencies.get(broker, latency_ms)
         self._latencies[broker] = prev * 0.8 + latency_ms * 0.2
+
+    # -- forex metrics ------------------------------------------------------
+
+    def get_forex_execution_quality(self, broker: str, symbol: str) -> dict[str, Any]:
+        """Return forex-specific execution quality metrics for a broker.
+
+        Useful for monitoring execution during news events, session
+        transitions, and other periods of elevated spread/slippage.
+        """
+        return {
+            "broker": broker,
+            "symbol": symbol,
+            "fill_rate": round(self._fill_rates.get(broker, 0.0), 3),
+            "avg_latency_ms": round(self._latencies.get(broker, 0.0), 1),
+            "error_count": self._error_counts.get(broker, 0),
+            "order_count": self._order_counts.get(broker, 0),
+        }
 
     # -- diagnostics --------------------------------------------------------
 

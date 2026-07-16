@@ -7,6 +7,14 @@ from alphastack.risk.circuit_breaker import CircuitBreaker, CircuitBreakerState
 from alphastack.risk.correlation import CorrelationMonitor
 from alphastack.risk.exposure import ExposureManager
 from alphastack.risk.validators import TradeValidator
+from alphastack.risk.forex_risk import (
+    ForexRiskManager,
+    MarginMonitor,
+    SwapTracker,
+    SessionGuard,
+    WeekendGapProtection,
+    SpreadMonitor,
+)
 
 __all__ = [
     "RiskGovernor",
@@ -17,4 +25,10 @@ __all__ = [
     "CorrelationMonitor",
     "ExposureManager",
     "TradeValidator",
+    "ForexRiskManager",
+    "MarginMonitor",
+    "SwapTracker",
+    "SessionGuard",
+    "WeekendGapProtection",
+    "SpreadMonitor",
 ]

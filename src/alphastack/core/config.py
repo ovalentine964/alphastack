@@ -78,6 +78,16 @@ class MT5Settings(BaseSettings):
     timeout: int = 60_000  # ms
 
 
+class OandaSettings(BaseSettings):
+    """OANDA v20 API credentials."""
+
+    model_config = SettingsConfigDict(env_prefix="OANDA_")
+
+    account_id: str = ""
+    api_key: SecretStr = SecretStr("")
+    environment: str = "practice"  # "practice" or "live"
+
+
 class CCXTSettings(BaseSettings):
     """CCXT exchange credentials."""
 
@@ -156,6 +166,7 @@ class Settings(BaseSettings):
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     mt5: MT5Settings = Field(default_factory=MT5Settings)
+    oanda: OandaSettings = Field(default_factory=OandaSettings)
     ccxt: CCXTSettings = Field(default_factory=CCXTSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     feeds: DataFeedSettings = Field(default_factory=DataFeedSettings)

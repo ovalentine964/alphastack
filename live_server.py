@@ -200,6 +200,191 @@ _TOKEN_BLOCKLIST_MAX: int = 10000
 
 
 # ═══════════════════════════════════════════════════════════
+# Forex Utilities & OANDA Connector
+# ═══════════════════════════════════════════════════════════
+
+_FOREX_PAIRS = {
+    "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD",
+    "NZD/USD", "USD/CAD", "EUR/GBP", "EUR/JPY", "GBP/JPY",
+}
+
+
+def _is_forex_symbol(symbol: str) -> bool:
+    """Check if a symbol is a forex pair."""
+    return symbol in _FOREX_PAIRS
+
+
+# ─── OANDA connector (inline for zero new files) ──────────
+
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None  # type: ignore[assignment]
+
+
+class OandaConnector:
+    """Lightweight OANDA v20 REST connector for forex market data and trading."""
+
+    def __init__(self, api_token: str, account_id: str, practice: bool = True) -> None:
+        self.api_token = api_token
+        self.account_id = account_id
+        self.practice = practice
+        self._base_url = (
+            "https://api-fxpractice.oanda.com" if practice
+            else "https://api-fxtrade.oanda.com"
+        )
+        self._session = None
+        self._connected = False
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected and self._session is not None
+
+    async def connect(self) -> None:
+        if aiohttp is None:
+            raise RuntimeError("aiohttp not installed — cannot use OANDA")
+        self._session = aiohttp.ClientSession(
+            headers={
+                "Authorization": f"Bearer {self.api_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=aiohttp.ClientTimeout(total=15),
+        )
+        try:
+            await self._request("GET", f"/v3/accounts/{self.account_id}/summary")
+            self._connected = True
+            logger.info("oanda.connected", practice=self.practice)
+        except Exception as e:
+            self._connected = False
+            logger.warning("oanda.connect_failed", error=str(e))
+            raise
+
+    async def disconnect(self) -> None:
+        if self._session:
+            await self._session.close()
+            self._session = None
+        self._connected = False
+        logger.info("oanda.disconnected")
+
+    async def _request(self, method: str, path: str, **kwargs) -> dict:
+        if not self._session:
+            raise RuntimeError("OANDA not connected")
+        url = f"{self._base_url}{path}"
+        async with self._session.request(method, url, **kwargs) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"OANDA {resp.status}: {body[:500]}")
+            return await resp.json()
+
+    async def get_account(self) -> dict:
+        """Fetch account summary."""
+        data = await self._request("GET", f"/v3/accounts/{self.account_id}/summary")
+        acct = data.get("account", {})
+        return {
+            "account_id": acct.get("id", self.account_id),
+            "currency": acct.get("currency", "USD"),
+            "balance": float(acct.get("balance", 0)),
+            "nav": float(acct.get("NAV", 0)),
+            "unrealized_pnl": float(acct.get("unrealizedPL", 0)),
+            "margin_used": float(acct.get("marginUsed", 0)),
+            "margin_available": float(acct.get("marginAvailable", 0)),
+            "open_trade_count": int(acct.get("openTradeCount", 0)),
+            "pl": float(acct.get("pl", 0)),
+        }
+
+    async def get_price(self, instrument: str) -> dict:
+        """Fetch current price for an instrument (e.g. EUR/USD)."""
+        oanda_symbol = instrument.replace("/", "_")
+        data = await self._request("GET", f"/v3/accounts/{self.account_id}/pricing",
+                                   params={"instruments": oanda_symbol})
+        prices = data.get("prices", [])
+        if not prices:
+            raise RuntimeError(f"No price data for {instrument}")
+        p = prices[0]
+        bid = float(p.get("bids", [{}])[0].get("price", 0))
+        ask = float(p.get("asks", [{}])[0].get("price", 0))
+        return {
+            "symbol": instrument,
+            "oanda_symbol": oanda_symbol,
+            "bid": bid,
+            "ask": ask,
+            "spread": ask - bid,
+            "timestamp": p.get("time", ""),
+            "tradeable": p.get("tradeable", False),
+        }
+
+    async def get_candles(self, instrument: str, granularity: str = "H1",
+                          count: int = 200) -> list:
+        """Fetch OHLCV candles. Returns [[ts, o, h, l, c, volume], ...]"""
+        oanda_symbol = instrument.replace("/", "_")
+        data = await self._request(
+            "GET",
+            f"/v3/instruments/{oanda_symbol}/candles",
+            params={"granularity": granularity, "count": str(count), "price": "MBA"},
+        )
+        candles = []
+        for c in data.get("candles", []):
+            if not c.get("complete", False):
+                continue
+            mid = c.get("mid", {})
+            candles.append([
+                c.get("time", ""),
+                float(mid.get("o", 0)),
+                float(mid.get("h", 0)),
+                float(mid.get("l", 0)),
+                float(mid.get("c", 0)),
+                int(c.get("volume", 0)),
+            ])
+        return candles
+
+    async def get_pairs(self) -> list:
+        """List available forex instruments for this account."""
+        data = await self._request("GET", f"/v3/accounts/{self.account_id}/instruments")
+        instruments = data.get("instruments", [])
+        return [
+            i["name"].replace("_", "/") for i in instruments
+            if i.get("type") == "CURRENCY"
+        ]
+
+    async def place_order(self, instrument: str, units: int, side: str = "buy",
+                          stop_loss: float | None = None,
+                          take_profit: float | None = None) -> dict:
+        """Place a market order. units > 0 = buy, units < 0 = sell."""
+        oanda_symbol = instrument.replace("/", "_")
+        order_body: dict[str, Any] = {
+            "type": "MARKET",
+            "instrument": oanda_symbol,
+            "units": str(units if side == "buy" else -abs(units)),
+            "timeInForce": "FOK",
+        }
+        if stop_loss:
+            order_body["stopLossOnFill"] = {"price": f"{stop_loss:.5f}"}
+        if take_profit:
+            order_body["takeProfitOnFill"] = {"price": f"{take_profit:.5f}"}
+        data = await self._request(
+            "POST",
+            f"/v3/accounts/{self.account_id}/orders",
+            json={"order": order_body},
+        )
+        return data
+
+
+# Global OANDA connector (lazy init)
+oanda_connector: OandaConnector | None = None
+
+
+def _init_oanda() -> OandaConnector | None:
+    """Initialize OANDA connector from environment variables."""
+    token = os.environ.get("OANDA_API_TOKEN", "")
+    account_id = os.environ.get("OANDA_ACCOUNT_ID", "")
+    if not token or not account_id:
+        logger.info("oanda.not_configured", msg="Set OANDA_API_TOKEN and OANDA_ACCOUNT_ID")
+        return None
+    practice = os.environ.get("OANDA_ENV", "practice") == "practice"
+    return OandaConnector(api_token=token, account_id=account_id, practice=practice)
+
+
+# ═══════════════════════════════════════════════════════════
 # Market Data Helpers
 # ═══════════════════════════════════════════════════════════
 
@@ -219,6 +404,16 @@ def _compute_atr(highs, lows, closes, period=14):
 
 
 async def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
+    """Fetch OHLCV from the appropriate source based on symbol type."""
+    # Forex pairs → OANDA
+    if _is_forex_symbol(symbol) and oanda_connector and oanda_connector.is_connected:
+        tf_map = {"1h": "H1", "4h": "H4", "1d": "D", "1m": "M1", "5m": "M5", "15m": "M15"}
+        oanda_tf = tf_map.get(timeframe, "H1")
+        try:
+            return await oanda_connector.get_candles(symbol, oanda_tf, limit)
+        except Exception as e:
+            logger.warning("oanda.candles_failed", symbol=symbol, error=str(e))
+    # Crypto → Binance (also fallback for forex if OANDA unavailable)
     ex = _get_exchange()
     if ex is None:
         return []
@@ -226,7 +421,11 @@ async def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
 
 
 async def _build_market_data(symbol: str) -> dict[str, Any]:
-    """Fetch real market data from Binance for the pipeline."""
+    """Fetch real market data from the appropriate source.
+
+    For forex pairs: uses OANDA if configured, otherwise falls back to Binance.
+    For crypto: always uses Binance.
+    """
     candles_1h = await _fetch_ohlcv(symbol, "1h", 200)
     candles_4h = await _fetch_ohlcv(symbol, "4h", 100)
     candles_1d = await _fetch_ohlcv(symbol, "1d", 60)
@@ -242,23 +441,53 @@ async def _build_market_data(symbol: str) -> dict[str, Any]:
 
     current_price = closes[-1] if closes else 0.0
     atr = _compute_atr(highs, lows, closes, 14)
-    pip_size = 1.0
 
+    # Forex-aware pip size
+    is_fx = _is_forex_symbol(symbol)
+    if is_fx:
+        pip_size = 0.01 if "JPY" in symbol else 0.0001
+    else:
+        pip_size = 1.0
+
+    # Spread calculation — OANDA for forex, order book for crypto
     spread_pips = 1.0
-    try:
-        ob = await asyncio.to_thread(_get_exchange().fetch_order_book, symbol, 5)
-        if ob['bids'] and ob['asks']:
-            spread_pips = (ob['asks'][0][0] - ob['bids'][0][0]) / pip_size
-    except Exception:
-        pass
+    if is_fx and oanda_connector and oanda_connector.is_connected:
+        try:
+            price_data = await oanda_connector.get_price(symbol)
+            spread_raw = price_data.get("spread", 0)
+            if pip_size > 0:
+                spread_pips = round(spread_raw / pip_size, 1)
+        except Exception:
+            pass
+    else:
+        try:
+            ob = await asyncio.to_thread(_get_exchange().fetch_order_book, symbol, 5)
+            if ob['bids'] and ob['asks']:
+                spread_pips = (ob['asks'][0][0] - ob['bids'][0][0]) / pip_size
+        except Exception:
+            pass
+
+    # Pip value per standard lot
+    if is_fx:
+        contract_size = 100_000
+        quote_ccy = symbol.split("/")[1] if "/" in symbol else "USD"
+        if quote_ccy == "USD":
+            pip_value = pip_size * contract_size  # e.g. 0.0001 * 100000 = $10
+        else:
+            pip_value = pip_size * contract_size  # Approximate
+    else:
+        pip_value = 1.0
 
     return {
         "opens": opens, "highs": highs, "lows": lows, "closes": closes, "volumes": volumes,
         "close": current_price,
         "timeframe_closes": {"1h": closes[-50:], "4h": h4_closes[-50:], "1d": d_closes[-50:]},
         "htf_closes": d_closes[-50:] if len(d_closes) >= 50 else d_closes,
-        "atr_pips": round(atr / pip_size, 2), "pip_size": pip_size,
-        "spread_pips": round(spread_pips, 2), "pip_value": 1.0,
+        "atr_pips": round(atr / pip_size, 2) if pip_size > 0 else 0,
+        "pip_size": pip_size,
+        "spread_pips": round(spread_pips, 2),
+        "pip_value": pip_value,
+        "is_forex": is_fx,
         "news_sentiment": 0.0, "high_impact_events": [], "volatility_index": 0.0,
         "account_balance": 10_000.0, "risk_pct": 1.0, "rsi_period": 14,
         "rr_multipliers": [1.5, 2.5, 4.0],
@@ -416,7 +645,9 @@ async def _run_orchestrator(symbol: str) -> dict[str, Any]:
 
 def _init_trading_loop() -> TradingLoop:
     """Create the TradingLoop singleton wired to existing singletons."""
-    cfg = LoopConfig(interval=Interval.H4)
+    cfg = LoopConfig(interval=Interval.H4, symbols=['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
+                      forex_symbols=['EUR/USD', 'GBP/USD', 'USD/JPY'],
+                      forex_enabled=bool(os.environ.get("OANDA_API_TOKEN")))
     return TradingLoop(
         config=cfg,
         build_market_data=_build_market_data,
@@ -503,11 +734,23 @@ _LOGIN_LIMITER = RateLimiter(rpm=10, burst=3)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _telegram_bot, trading_loop
+    global _telegram_bot, trading_loop, oanda_connector
     setup_logging(json_output=False)
     logger.info("api_startup")
     await event_bus.connect()
     logger.info("api_startup.event_bus_connected")
+
+    # Initialize OANDA connector and register in broker registry
+    try:
+        oanda_connector = _init_oanda()
+        if oanda_connector:
+            await oanda_connector.connect()
+            broker_registry.register("oanda", oanda_connector)  # type: ignore[arg-type]
+            logger.info("api_startup.oanda_registered")
+    except Exception as e:
+        logger.warning("api_startup.oanda_failed", error=str(e))
+        oanda_connector = None
+
     trading_loop = _init_trading_loop()
     logger.info("api_startup.trading_loop_initialized")
 
@@ -534,6 +777,11 @@ async def lifespan(app: FastAPI):
     # Graceful shutdown: stop loop before closing event bus
     if trading_loop and trading_loop.state.running:
         await trading_loop.stop()
+
+    # Shutdown OANDA connector
+    if oanda_connector:
+        await oanda_connector.disconnect()
+        oanda_connector = None
 
     # Shutdown Telegram bot
     if _telegram_bot:
@@ -1132,7 +1380,17 @@ async def market_ticker(symbol: str):
 
 
 async def _fetch_ticker(sym: str) -> dict:
-    """Fetch a single ticker from Binance (used for parallel gathering)."""
+    """Fetch a single ticker from the appropriate source."""
+    # Forex → OANDA
+    if _is_forex_symbol(sym) and oanda_connector and oanda_connector.is_connected:
+        try:
+            p = await oanda_connector.get_price(sym)
+            mid = (p["bid"] + p["ask"]) / 2 if p["bid"] and p["ask"] else 0
+            return {"symbol": sym, "price": round(mid, 5), "bid": p["bid"], "ask": p["ask"],
+                    "spread": round(p["spread"], 6), "source": "oanda"}
+        except Exception:
+            pass
+    # Crypto → Binance
     try:
         t = await asyncio.to_thread(_get_exchange().fetch_ticker, sym)
         return {"symbol": sym, "price": t['last'], "change_24h": t.get('percentage', 0)}
@@ -1143,10 +1401,67 @@ async def _fetch_ticker(sym: str) -> dict:
 @app.get("/api/v1/market/tickers")
 async def market_tickers():
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'LINK/USDT', 'ADA/USDT']
+    # Add forex pairs if OANDA is available
+    if oanda_connector and oanda_connector.is_connected:
+        symbols.extend(['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CHF'])
     results = await asyncio.gather(*[_fetch_ticker(s) for s in symbols], return_exceptions=True)
-    # Filter out any exceptions that slipped through (shouldn't happen with helper)
     return [r for r in results if isinstance(r, dict)]
 
+
+# ═══════════════════════════════════════════════════════════
+# FOREX ENDPOINTS (OANDA)
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/api/v1/forex/pairs")
+async def forex_pairs():
+    """List available forex pairs. Returns OANDA pairs if connected, else defaults."""
+    if oanda_connector and oanda_connector.is_connected:
+        try:
+            pairs = await oanda_connector.get_pairs()
+            return {"pairs": pairs, "source": "oanda", "count": len(pairs)}
+        except Exception as e:
+            logger.warning("forex.pairs_failed", error=str(e))
+    # Return default pairs when OANDA is not configured
+    default_pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD',
+                     'NZD/USD', 'USD/CAD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY']
+    return {"pairs": default_pairs, "source": "default", "count": len(default_pairs)}
+
+
+@app.get("/api/v1/forex/price/{symbol:path}")
+async def forex_price(symbol: str):
+    """Get live forex price from OANDA.
+
+    Symbol format: EUR/USD or EUR_USD (both accepted).
+    """
+    if not oanda_connector or not oanda_connector.is_connected:
+        raise HTTPException(503, "OANDA not connected. Set OANDA_API_TOKEN and OANDA_ACCOUNT_ID.")
+    # Normalize symbol format
+    symbol = symbol.replace("_", "/").upper()
+    if not _is_forex_symbol(symbol):
+        raise HTTPException(400, f"Not a supported forex pair: {symbol}")
+    try:
+        price = await oanda_connector.get_price(symbol)
+        return price
+    except Exception as e:
+        logger.warning("forex.price_failed", symbol=symbol, error=str(e))
+        raise HTTPException(502, f"Failed to fetch price: {e}")
+
+
+@app.get("/api/v1/forex/account")
+async def forex_account():
+    """Get OANDA account info."""
+    if not oanda_connector or not oanda_connector.is_connected:
+        raise HTTPException(503, "OANDA not connected. Set OANDA_API_TOKEN and OANDA_ACCOUNT_ID.")
+    try:
+        return await oanda_connector.get_account()
+    except Exception as e:
+        logger.warning("forex.account_failed", error=str(e))
+        raise HTTPException(502, f"Failed to fetch account: {e}")
+
+
+# ═══════════════════════════════════════════════════════════
+# ORDER BOOK ENDPOINT
+# ═══════════════════════════════════════════════════════════
 
 @app.get("/api/v1/market/orderbook/{symbol:path}")
 async def market_orderbook(symbol: str, limit: int = 10):
@@ -1233,6 +1548,7 @@ async def health():
         "uptime_seconds": round(time.time() - _START_TIME, 2),
         "binance_connected": binance_ok, "btc_price": btc_price,
         "testnet_configured": exchange_testnet is not None,
+        "oanda_connected": oanda_connector is not None and oanda_connector.is_connected,
         "pipeline_available": True, "orchestrator_available": True,
         "agents": ["news", "strategy", "risk", "execution", "reflection"],
         "event_bus": "in_memory",
@@ -1311,17 +1627,31 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=4001, reason="Invalid or expired token")
         return
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'LINK/USDT']
+    # Add forex pairs if OANDA is available
+    if oanda_connector and oanda_connector.is_connected:
+        symbols.extend(['EUR/USD', 'GBP/USD', 'USD/JPY'])
     try:
-        await websocket.send_json({"type": "connected", "data": {"message": "Live Binance feed"}})
+        await websocket.send_json({"type": "connected", "data": {"message": "Live feed (Binance + OANDA)"}})
         while True:
             for sym in symbols:
                 try:
-                    ticker = await asyncio.to_thread(_get_exchange().fetch_ticker, sym)
-                    await websocket.send_json({
-                        "type": "price_update",
-                        "data": {"symbol": sym, "price": ticker['last'],
-                                 "change": ticker.get('percentage', 0), "volume": ticker.get('quoteVolume', 0)}
-                    })
+                    # Forex → OANDA price
+                    if _is_forex_symbol(sym) and oanda_connector and oanda_connector.is_connected:
+                        p = await oanda_connector.get_price(sym)
+                        mid = (p["bid"] + p["ask"]) / 2 if p["bid"] and p["ask"] else 0
+                        await websocket.send_json({
+                            "type": "price_update",
+                            "data": {"symbol": sym, "price": round(mid, 5),
+                                     "bid": p["bid"], "ask": p["ask"],
+                                     "spread": round(p["spread"], 6), "source": "oanda"}
+                        })
+                    else:
+                        ticker = await asyncio.to_thread(_get_exchange().fetch_ticker, sym)
+                        await websocket.send_json({
+                            "type": "price_update",
+                            "data": {"symbol": sym, "price": ticker['last'],
+                                     "change": ticker.get('percentage', 0), "volume": ticker.get('quoteVolume', 0)}
+                        })
                 except Exception:
                     pass
                 await asyncio.sleep(0.5)

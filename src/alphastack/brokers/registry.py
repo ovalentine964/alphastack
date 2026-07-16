@@ -150,6 +150,71 @@ class BrokerRegistry:
 
         raise RuntimeError("All brokers exhausted – order could not be placed")
 
+    # -- auto-detection / factory ------------------------------------------
+
+    @classmethod
+    def from_env(cls) -> BrokerRegistry:
+        """Create a registry and auto-register brokers from environment variables.
+
+        Detection logic:
+        1. If ``CCXT_API_KEY`` is set → register the CCXT connector.
+        2. If ``OANDA_ACCOUNT_ID`` + ``OANDA_API_KEY`` are set → register OANDA.
+        3. If ``MT5_LOGIN`` is set → register MT5.
+        4. The first-registered broker becomes the default.
+        """
+        from alphastack.core.config import get_settings
+
+        registry = cls()
+        cfg = get_settings()
+
+        # --- CCXT (crypto) ---
+        ccxt_key = cfg.ccxt.api_key.get_secret_value()
+        if ccxt_key:
+            try:
+                from alphastack.brokers.ccxt_connector import CCXTConnector
+                connector = CCXTConnector()
+                registry.register("ccxt", connector, default=True)
+                logger.info("auto_registered_ccxt", exchange=cfg.ccxt.exchange)
+            except Exception as exc:
+                logger.warning("auto_register_ccxt_failed", error=str(exc))
+
+        # --- OANDA (forex) ---
+        oanda_id = cfg.oanda.account_id
+        oanda_key = cfg.oanda.api_key.get_secret_value()
+        if oanda_id and oanda_key:
+            try:
+                from alphastack.brokers.oanda_connector import OandaConnector
+                connector = OandaConnector()
+                default = not bool(ccxt_key)  # Default if no crypto broker
+                registry.register("oanda", connector, default=default)
+                logger.info(
+                    "auto_registered_oanda",
+                    account=oanda_id,
+                    environment=cfg.oanda.environment,
+                )
+            except Exception as exc:
+                logger.warning("auto_register_oanda_failed", error=str(exc))
+
+        # --- MT5 (forex / CFD) ---
+        mt5_login = cfg.mt5.login
+        if mt5_login:
+            try:
+                from alphastack.brokers.mt5_connector import MT5Connector
+                connector = MT5Connector()
+                default = not bool(ccxt_key or oanda_key)
+                registry.register("mt5", connector, default=default)
+                logger.info("auto_registered_mt5", login=mt5_login)
+            except Exception as exc:
+                logger.warning("auto_register_mt5_failed", error=str(exc))
+
+        if not registry.names:
+            logger.warning(
+                "no_brokers_configured",
+                msg="Set CCXT_API_KEY, OANDA_ACCOUNT_ID+OANDA_API_KEY, or MT5_LOGIN to enable a broker.",
+            )
+
+        return registry
+
     # -- status -------------------------------------------------------------
 
     def status(self) -> dict[str, str]:

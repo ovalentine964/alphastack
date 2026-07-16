@@ -49,6 +49,43 @@ mt5:
   timeout: 60000                # Connection timeout in ms
 
 # -----------------------------------------------------------------------------
+# Broker – OANDA (Forex)
+# -----------------------------------------------------------------------------
+oanda:
+  api_token: ""                 # Override via OANDA_API_TOKEN env var
+  account_id: ""                 # Override via OANDA_ACCOUNT_ID env var
+  environment: practice          # practice | live  (override via OANDA_ENV)
+  max_retries: 3
+  timeout_seconds: 15
+
+# -----------------------------------------------------------------------------
+# Forex Configuration
+# -----------------------------------------------------------------------------
+forex:
+  enabled: true
+  pairs:
+    - EUR/USD
+    - GBP/USD
+    - USD/JPY
+    - AUD/USD
+    - USD/CHF
+    - NZD/USD
+    - USD/CAD
+    - EUR/GBP
+    - EUR/JPY
+    - GBP/JPY
+  risk_pct: 0.01                  # 1% risk per forex trade
+  min_confluence: 0.4             # Higher confluence threshold for forex
+  session_filter: true            # Only trade during liquid sessions (London/NY)
+  max_spread_pips: 5.0            # Skip trades if spread exceeds this
+  default_stop_pips: 20.0         # Default stop loss in pips if none specified
+  lot_sizing:
+    mode: risk_based              # risk_based | fixed
+    fixed_lots: 0.1               # Used when mode=fixed
+    max_lots: 10.0                # Hard cap on position size
+    min_lots: 0.01                # Minimum position size (micro lot)
+
+# -----------------------------------------------------------------------------
 # Broker – CCXT (crypto exchanges)
 # -----------------------------------------------------------------------------
 ccxt:
@@ -116,9 +153,11 @@ trading:
   symbols:
     - BTC/USDT
     - ETH/USDT
+    - SOL/USDT
+  forex_symbols:
     - EUR/USD
-    - AAPL
-    - SPY
+    - GBP/USD
+    - USD/JPY
   timeframes:
     - 1m
     - 5m

@@ -9,7 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-from alphastack.strategy.context import AlphaStackContext, Bias, Direction, Session
+from alphastack.strategy.context import (
+    AlphaStackContext,
+    Bias,
+    Direction,
+    FundamentalData,
+    MarketBias,
+    Session,
+    SessionData,
+)
 from alphastack.strategy.pipeline import AlphaStackPipeline
 from alphastack.strategy.steps.base import AlphaStackStep
 
@@ -249,3 +257,251 @@ class TestPipelineStepBase:
         step = BadStep()
         with pytest.raises(RuntimeError, match="oops"):
             await step.run(AlphaStackContext())
+
+
+# ===========================================================================
+# FOREX Pipeline Tests
+# ===========================================================================
+
+class TestForexPipeline:
+    """Tests for pipeline behavior with forex-specific market data."""
+
+    @pytest.fixture
+    def eurusd_context(self) -> AlphaStackContext:
+        """EUR/USD context with forex-specific market data fields."""
+        from tests.conftest import generate_ohlcv
+        ohlcv = generate_ohlcv(200, start_price=1.1000, volatility=0.0005, seed=77)
+        return AlphaStackContext(
+            symbol="EUR/USD",
+            timeframe="1H",
+            timestamp=datetime(2025, 6, 16, 13, 0, 0, tzinfo=timezone.utc),  # London-NY overlap
+            market_data={
+                **ohlcv,
+                "close": ohlcv["closes"][-1],
+                "high_impact_events": [],
+                "news_sentiment": 0.2,
+                "volatility_index": 12.0,
+                "atr_pips": 45.0,
+                "pip_size": 0.0001,
+                "spread_pips": 1.2,
+                "account_balance": 10_000.0,
+                "risk_pct": 1.0,
+                "pip_value": 10.0,
+                "stop_multiplier": 1.5,
+                "rsi_period": 14,
+                # Forex-specific fields
+                "swap_long": -0.50,         # $/day per lot
+                "swap_short": 0.30,
+                "margin_required": 1_100.0,
+                "leverage": 100,
+                "pair_type": "major",
+                "session": "london_ny_overlap",
+                "contract_size": 100_000,
+            },
+        )
+
+    @pytest.fixture
+    def usdjpy_context(self) -> AlphaStackContext:
+        """USD/JPY context with JPY-pair specifics."""
+        from tests.conftest import generate_ohlcv
+        ohlcv = generate_ohlcv(200, start_price=150.00, volatility=0.10, seed=88)
+        return AlphaStackContext(
+            symbol="USD/JPY",
+            timeframe="1H",
+            timestamp=datetime(2025, 6, 16, 3, 0, 0, tzinfo=timezone.utc),  # Tokyo session
+            market_data={
+                **ohlcv,
+                "close": ohlcv["closes"][-1],
+                "high_impact_events": [],
+                "news_sentiment": 0.0,
+                "volatility_index": 10.0,
+                "atr_pips": 30.0,
+                "pip_size": 0.01,               # JPY pairs use 0.01
+                "spread_pips": 1.5,
+                "account_balance": 5_000.0,
+                "risk_pct": 2.0,
+                "pip_value": 6.67,              # ~$6.67 per pip per lot
+                "stop_multiplier": 1.5,
+                "rsi_period": 14,
+                "swap_long": 0.80,
+                "swap_short": -1.20,
+                "margin_required": 1_500.0,
+                "leverage": 100,
+                "pair_type": "major",
+                "session": "tokyo",
+                "contract_size": 100_000,
+            },
+        )
+
+    @pytest.fixture
+    def gbpjpy_context(self) -> AlphaStackContext:
+        """GBP/JPY — volatile cross pair."""
+        from tests.conftest import generate_ohlcv
+        ohlcv = generate_ohlcv(200, start_price=190.00, volatility=0.15, seed=99)
+        return AlphaStackContext(
+            symbol="GBP/JPY",
+            timeframe="4H",
+            timestamp=datetime(2025, 6, 16, 14, 0, 0, tzinfo=timezone.utc),
+            market_data={
+                **ohlcv,
+                "close": ohlcv["closes"][-1],
+                "high_impact_events": [],
+                "news_sentiment": -0.1,
+                "volatility_index": 18.0,
+                "atr_pips": 60.0,
+                "pip_size": 0.01,
+                "spread_pips": 3.0,
+                "account_balance": 25_000.0,
+                "risk_pct": 0.5,
+                "pip_value": 6.67,
+                "stop_multiplier": 2.0,
+                "rsi_period": 14,
+                "swap_long": -0.90,
+                "swap_short": 0.40,
+                "margin_required": 2_500.0,
+                "leverage": 50,
+                "pair_type": "minor",
+                "session": "london",
+                "contract_size": 100_000,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_pipeline_runs_with_eurusd_data(self, eurusd_context: AlphaStackContext) -> None:
+        """Pipeline should complete with EUR/USD forex data (using stubs)."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(eurusd_context)
+        assert result is not None
+        assert result.symbol == "EUR/USD"
+        assert result.market_data["pip_size"] == pytest.approx(0.0001)
+        assert result.market_data["spread_pips"] == pytest.approx(1.2)
+
+    @pytest.mark.asyncio
+    async def test_pipeline_runs_with_usdjpy_data(self, usdjpy_context: AlphaStackContext) -> None:
+        """Pipeline should complete with USD/JPY data (different pip size)."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(usdjpy_context)
+        assert result is not None
+        assert result.symbol == "USD/JPY"
+        assert result.market_data["pip_size"] == pytest.approx(0.01)
+
+    @pytest.mark.asyncio
+    async def test_pipeline_runs_with_cross_pair(self, gbpjpy_context: AlphaStackContext) -> None:
+        """Pipeline should handle volatile cross pairs like GBP/JPY."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(gbpjpy_context)
+        assert result is not None
+        assert result.symbol == "GBP/JPY"
+
+    @pytest.mark.asyncio
+    async def test_pipeline_preserves_forex_market_data(self, eurusd_context: AlphaStackContext) -> None:
+        """Forex-specific market data should survive the full pipeline."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(eurusd_context)
+        md = result.market_data
+        # Original forex fields preserved
+        assert md.get("pip_size") == pytest.approx(0.0001)
+        assert md.get("contract_size") == 100_000
+        assert md.get("leverage") == 100
+        assert md.get("pair_type") == "major"
+
+    @pytest.mark.asyncio
+    async def test_pipeline_parallel_with_forex_data(self, eurusd_context: AlphaStackContext) -> None:
+        """Parallel mode should work with forex data (steps 5-9)."""
+        pipeline = AlphaStackPipeline(parallel=True)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(eurusd_context)
+        assert result is not None
+        assert result.symbol == "EUR/USD"
+
+    @pytest.mark.asyncio
+    async def test_pipeline_signal_generation_eurusd(self, eurusd_context: AlphaStackContext) -> None:
+        """Pipeline should produce a valid context for signal generation."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(eurusd_context)
+        # Context should have all sub-models populated
+        assert result.bias is not None
+        assert result.structure is not None
+        assert result.confluence is not None
+        assert result.stop_loss is not None
+        assert result.take_profit is not None
+        assert result.sizing is not None
+
+    @pytest.mark.asyncio
+    async def test_pipeline_with_bullish_forex_context(self) -> None:
+        """Pipeline with strong bullish forex signals should preserve bias."""
+        from tests.conftest import generate_ohlcv
+        ohlcv = generate_ohlcv(200, start_price=1.1000, volatility=0.0005, seed=42)
+        ctx = AlphaStackContext(
+            symbol="EUR/USD",
+            timeframe="1H",
+            timestamp=datetime(2025, 6, 16, 13, 0, 0, tzinfo=timezone.utc),
+            market_data={
+                **ohlcv,
+                "close": ohlcv["closes"][-1],
+                "high_impact_events": [],
+                "news_sentiment": 0.5,
+                "volatility_index": 12.0,
+                "atr_pips": 40.0,
+                "pip_size": 0.0001,
+                "spread_pips": 1.0,
+                "account_balance": 10_000.0,
+                "risk_pct": 1.0,
+                "pip_value": 10.0,
+                "stop_multiplier": 1.5,
+                "rsi_period": 14,
+            },
+            fundamental=FundamentalData(bias=Bias.BULLISH, news_sentiment=0.5, macro_regime="risk_on"),
+            bias=MarketBias(bias=Bias.BULLISH, trend_strength=0.75, htf_bias=Bias.BULLISH),
+            session=SessionData(active=Session.LONDON, volatility=1.0, typical_range_pips=50.0),
+        )
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        result = await pipeline.run(ctx)
+        assert result is not None
+        # Bullish context should preserve bias through pipeline
+        assert result.fundamental.bias == Bias.BULLISH
+        assert result.bias.bias == Bias.BULLISH
+
+    @pytest.mark.asyncio
+    async def test_pipeline_step_events_for_forex(self, eurusd_context: AlphaStackContext) -> None:
+        """All 16 steps should emit events when processing forex data."""
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        events: list[tuple[int, str]] = []
+        pipeline.on_step(lambda sn, name, ctx: events.append((sn, name)))
+        await pipeline.run(eurusd_context)
+        assert len(events) == 16
+        # Check step names are present
+        step_names = [name for _, name in events]
+        assert len(step_names) == 16
+
+    @pytest.mark.asyncio
+    async def test_pipeline_forex_with_no_market_data(self) -> None:
+        """Pipeline should handle forex context with minimal market data."""
+        ctx = AlphaStackContext(
+            symbol="EUR/USD",
+            timeframe="1H",
+            timestamp=datetime(2025, 6, 16, 12, 0, 0, tzinfo=timezone.utc),
+            market_data={"pip_size": 0.0001},
+        )
+        pipeline = AlphaStackPipeline(parallel=False)
+        for i in range(len(pipeline._steps)):
+            pipeline._steps[i] = StubStep(step_number=i + 1, step_name=f"stub_{i+1}")
+        # Should not crash even with minimal data
+        result = await pipeline.run(ctx)
+        assert result is not None
+        assert result.symbol == "EUR/USD"

@@ -20,7 +20,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
@@ -40,6 +40,197 @@ logger = get_logger("alphastack.engine")
 
 # Fixed initial capital for drawdown percentage normalization
 INITIAL_CAPITAL: float = 10000.0
+
+
+# ═══════════════════════════════════════════════════════════
+# Forex Utilities
+# ═══════════════════════════════════════════════════════════
+
+
+# Canonical forex pair metadata
+FOREX_PAIRS: dict[str, dict[str, Any]] = {
+    "EUR/USD": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00012},
+    "GBP/USD": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00015},
+    "USD/JPY": {"pip_size": 0.01,   "contract_size": 100_000, "spread_typical": 0.012},
+    "USD/CHF": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00018},
+    "AUD/USD": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00016},
+    "NZD/USD": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00020},
+    "USD/CAD": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00018},
+    "EUR/GBP": {"pip_size": 0.0001, "contract_size": 100_000, "spread_typical": 0.00015},
+    "EUR/JPY": {"pip_size": 0.01,   "contract_size": 100_000, "spread_typical": 0.015},
+    "GBP/JPY": {"pip_size": 0.01,   "contract_size": 100_000, "spread_typical": 0.025},
+}
+
+
+# Lot sizing constants
+STANDARD_LOT = 100_000
+MINI_LOT = 10_000
+MICRO_LOT = 1_000
+NANO_LOT = 100
+
+
+def is_forex_symbol(symbol: str) -> bool:
+    """Check if a symbol is a forex pair (canonical format EUR/USD or broker format EURUSD)."""
+    normalized = symbol.replace("/", "").upper()
+    # Check canonical format
+    if symbol in FOREX_PAIRS:
+        return True
+    # Check concatenated format (e.g. EURUSD, GBPUSD)
+    for pair in FOREX_PAIRS:
+        if pair.replace("/", "") == normalized:
+            return True
+    return False
+
+
+def get_forex_pip_size(symbol: str) -> float:
+    """Get pip size for a forex pair. Returns 0.0001 for most pairs, 0.01 for JPY pairs."""
+    if symbol in FOREX_PAIRS:
+        return FOREX_PAIRS[symbol]["pip_size"]
+    normalized = symbol.replace("/", "").upper()
+    for pair, meta in FOREX_PAIRS.items():
+        if pair.replace("/", "") == normalized:
+            return meta["pip_size"]
+    return 0.0001  # Default to 4-decimal pair
+
+
+def get_forex_contract_size(symbol: str) -> float:
+    """Get contract size for a forex pair (typically 100,000 units per standard lot)."""
+    if symbol in FOREX_PAIRS:
+        return FOREX_PAIRS[symbol]["contract_size"]
+    return STANDARD_LOT
+
+
+def calculate_pip_value(symbol: str, account_currency: str = "USD") -> float:
+    """Calculate pip value per standard lot in account currency.
+
+    For pairs where USD is the quote currency: pip_value = pip_size * contract_size
+    For pairs where USD is the base currency: pip_value = (pip_size * contract_size) / price
+    For crosses (no USD): requires live conversion rate.
+    """
+    pip_size = get_forex_pip_size(symbol)
+    contract = get_forex_contract_size(symbol)
+    base, quote = symbol.split("/")
+
+    if quote == account_currency:
+        # Direct: pip_value = pip_size * contract_size
+        return pip_size * contract
+    elif base == account_currency:
+        # Inverse: need price; return per-pip-per-lot approximation
+        return pip_size * contract  # Will be divided by price at runtime
+    else:
+        # Cross pair — approximate as direct
+        return pip_size * contract
+
+
+def calculate_lot_size(
+    account_balance: float,
+    risk_pct: float,
+    stop_loss_pips: float,
+    symbol: str,
+    pip_value: float | None = None,
+) -> float:
+    """Calculate position size in lots based on risk parameters.
+
+    Parameters
+    ----------
+    account_balance : float
+        Current account equity.
+    risk_pct : float
+        Risk per trade as a decimal (e.g. 0.01 = 1%).
+    stop_loss_pips : float
+        Stop loss distance in pips.
+    symbol : str
+        Forex pair symbol.
+    pip_value : float | None
+        Pip value per lot. If None, calculated from symbol metadata.
+
+    Returns
+    -------
+    float
+        Position size in standard lots (e.g. 0.10 = mini lot).
+    """
+    if stop_loss_pips <= 0:
+        return 0.0
+
+    risk_amount = account_balance * risk_pct
+    if pip_value is None:
+        pip_value = calculate_pip_value(symbol)
+
+    lots = risk_amount / (stop_loss_pips * pip_value)
+
+    # Round to nearest micro lot (0.01)
+    lots = max(round(lots, 2), 0.01)
+    # Cap at 100 lots for safety
+    return min(lots, 100.0)
+
+
+def pips_between(symbol: str, price1: float, price2: float) -> float:
+    """Calculate the number of pips between two prices."""
+    pip_size = get_forex_pip_size(symbol)
+    if pip_size <= 0:
+        return 0.0
+    return abs(price1 - price2) / pip_size
+
+
+# ── Forex market session awareness ────────────────────────
+
+class ForexSession(str, Enum):
+    """Major forex trading sessions (UTC times)."""
+    SYDNEY = "sydney"    # 22:00–07:00 UTC
+    TOKYO = "tokyo"      # 00:00–09:00 UTC
+    LONDON = "london"    # 07:00–16:00 UTC
+    NEW_YORK = "new_york" # 12:00–21:00 UTC
+    OFFLINE = "offline"
+
+
+def get_forex_session(now_utc: datetime | None = None) -> ForexSession:
+    """Determine the current forex trading session based on UTC time."""
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    hour = now_utc.hour
+
+    # Sessions overlap — return the primary active one
+    if 7 <= hour < 12:
+        return ForexSession.LONDON
+    elif 12 <= hour < 16:
+        return ForexSession.LONDON  # London/NY overlap (most liquid)
+    elif 16 <= hour < 21:
+        return ForexSession.NEW_YORK
+    elif 22 <= hour or hour < 0:
+        return ForexSession.SYDNEY
+    elif 0 <= hour < 7:
+        return ForexSession.TOKYO
+    return ForexSession.OFFLINE
+
+
+def is_forex_market_open(now_utc: datetime | None = None) -> bool:
+    """Check if the forex market is currently open.
+
+    Forex closes Friday ~22:00 UTC and reopens Sunday ~22:00 UTC.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+
+    weekday = now_utc.weekday()  # 0=Mon, 6=Sun
+    hour = now_utc.hour
+
+    # Saturday — closed all day
+    if weekday == 5:
+        return False
+    # Sunday — closed until ~22:00 UTC
+    if weekday == 6 and hour < 22:
+        return False
+    # Friday — closes at ~22:00 UTC
+    if weekday == 4 and hour >= 22:
+        return False
+
+    return True
+
+
+def is_liquid_session(now_utc: datetime | None = None) -> bool:
+    """Check if we're in a high-liquidity session (London or NY open)."""
+    session = get_forex_session(now_utc)
+    return session in (ForexSession.LONDON, ForexSession.NEW_YORK)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -83,9 +274,18 @@ class LoopConfig:
     symbols: list[str] = field(default_factory=lambda: [
         "BTC/USDT", "ETH/USDT", "SOL/USDT",
     ])
+    forex_symbols: list[str] = field(default_factory=lambda: [
+        "EUR/USD", "GBP/USD", "USD/JPY",
+    ])
     max_concurrent_trades: int = 3
     cooldown_after_loss: int = 1
     evolution_enabled: bool = True
+    forex_enabled: bool = True
+    # Risk parameters for forex
+    forex_risk_pct: float = 0.01        # 1% risk per forex trade
+    forex_min_confluence: float = 0.4   # Higher confluence threshold for forex
+    forex_session_filter: bool = True   # Only trade forex during liquid sessions
+    forex_max_spread_pips: float = 5.0  # Skip trades if spread > this
 
     @property
     def interval_seconds(self) -> int:
@@ -95,10 +295,16 @@ class LoopConfig:
         return {
             "interval": self.interval.value,
             "symbols": self.symbols,
+            "forex_symbols": self.forex_symbols,
             "max_concurrent_trades": self.max_concurrent_trades,
             "cooldown_after_loss": self.cooldown_after_loss,
             "evolution_enabled": self.evolution_enabled,
             "interval_seconds": self.interval_seconds,
+            "forex_enabled": self.forex_enabled,
+            "forex_risk_pct": self.forex_risk_pct,
+            "forex_min_confluence": self.forex_min_confluence,
+            "forex_session_filter": self.forex_session_filter,
+            "forex_max_spread_pips": self.forex_max_spread_pips,
         }
 
 
@@ -227,7 +433,9 @@ class TradingLoop:
         self.state.stopping = False
         self._task = asyncio.create_task(self._run_forever())
         logger.info("loop.started", interval=self.config.interval.value,
-                     symbols=self.config.symbols)
+                     symbols=self.config.symbols,
+                     forex_symbols=self.config.forex_symbols,
+                     forex_enabled=self.config.forex_enabled)
         return {"status": "started", "config": self.config.to_dict()}
 
     async def stop(self) -> dict[str, Any]:
@@ -286,6 +494,14 @@ class TradingLoop:
 
         self.state.running = False
 
+    @property
+    def all_symbols(self) -> list[str]:
+        """Combined list of crypto + forex symbols based on config."""
+        symbols = list(self.config.symbols)
+        if self.config.forex_enabled:
+            symbols.extend(self.config.forex_symbols)
+        return symbols
+
     async def _run_cycle(self) -> None:
         """Execute one full loop cycle.
 
@@ -306,13 +522,33 @@ class TradingLoop:
             logger.info("loop.cooldown", remaining=self.state.cooldown_remaining)
             return
 
+        # ── Forex market hours check ─────────────────────────
+        now_utc = datetime.now(timezone.utc)
+        forex_open = is_forex_market_open(now_utc)
+        liquid_session = is_liquid_session(now_utc)
+        current_session = get_forex_session(now_utc)
+
+        if self.config.forex_enabled and not forex_open:
+            logger.info("loop.forex_market_closed", session=current_session.value,
+                        utc_time=now_utc.isoformat())
+
         # ── 1. READ MEMORY ───────────────────────────────────
         memory_context = self._read_memory()
 
         # ── 2–6. Per-symbol: Analyze → Pipeline → Debate → Reflect → Execute ──
         signals = []
-        for symbol in self.config.symbols:
+        for symbol in self.all_symbols:
             try:
+                # Skip forex pairs when market is closed
+                if is_forex_symbol(symbol):
+                    if not forex_open:
+                        logger.debug("loop.skip_forex_closed", symbol=symbol)
+                        continue
+                    if self.config.forex_session_filter and not liquid_session:
+                        logger.info("loop.skip_forex_low_liquidity", symbol=symbol,
+                                    session=current_session.value)
+                        continue
+
                 # 2. ANALYZE MARKET
                 market_data = await self._build_market_data(symbol)
 
@@ -441,6 +677,46 @@ class TradingLoop:
 
         return True
 
+    def _calculate_forex_quantity(self, signal: dict[str, Any]) -> float:
+        """Calculate forex position size in lots based on risk parameters.
+
+        Uses the stop loss distance in pips, account balance, and risk percentage
+        to determine the appropriate lot size.
+        """
+        symbol = signal.get("symbol", "EUR/USD")
+        entry = signal.get("entry_price", 0)
+        stop_loss = signal.get("stop_loss")
+
+        if not entry or not stop_loss:
+            # No stop loss — use micro lot for safety
+            return 0.01
+
+        # Calculate stop loss in pips
+        sl_pips = pips_between(symbol, entry, stop_loss)
+        if sl_pips <= 0:
+            sl_pips = 20.0  # Default 20 pip stop
+
+        # Use account balance from market data or default
+        account_balance = 10_000.0  # Will be overridden by live balance if available
+        risk_pct = self.config.forex_risk_pct
+
+        pip_val = calculate_pip_value(symbol)
+        lots = calculate_lot_size(
+            account_balance=account_balance,
+            risk_pct=risk_pct,
+            stop_loss_pips=sl_pips,
+            symbol=symbol,
+            pip_value=pip_val,
+        )
+
+        logger.info("loop.forex_sizing", symbol=symbol, sl_pips=round(sl_pips, 1),
+                    lots=lots, risk_pct=risk_pct)
+        return lots
+
+    def _calculate_crypto_quantity(self, signal: dict[str, Any]) -> float:
+        """Calculate crypto position size. Returns a fixed minimal quantity."""
+        return 0.001  # Minimal size for safety
+
     def _execute_trade(self, signal: dict[str, Any]) -> dict[str, Any] | None:
         """Place a trade via the trade store."""
         # Validate entry price before executing
@@ -453,6 +729,17 @@ class TradingLoop:
             logger.info("loop.circuit_breaker", drawdown=self.state.current_drawdown)
             return None
 
+        symbol = signal.get("symbol", "")
+        is_forex = is_forex_symbol(symbol)
+
+        # Forex-specific confluence check
+        if is_forex:
+            confluence = signal.get("confluence_score", 0)
+            if confluence < self.config.forex_min_confluence:
+                logger.info("loop.forex_confluence_low", symbol=symbol,
+                            confluence=confluence, threshold=self.config.forex_min_confluence)
+                return None
+
         try:
             # Safe take_profit access
             tp = signal.get("take_profit")
@@ -463,20 +750,28 @@ class TradingLoop:
             else:
                 take_profit = None
 
+            # Calculate quantity based on asset type
+            if is_forex:
+                quantity = self._calculate_forex_quantity(signal)
+            else:
+                quantity = self._calculate_crypto_quantity(signal)
+
             trade = self._trade_store.create_trade({
-                "symbol": signal["symbol"],
+                "symbol": symbol,
                 "side": "buy" if signal.get("direction") == "long" else "sell",
-                "quantity": 0.001,  # Minimal size for safety
+                "quantity": quantity,
                 "price": signal.get("entry_price"),
                 "stop_loss": signal.get("stop_loss"),
                 "take_profit": take_profit,
                 "strategy_id": signal.get("strategy_id", "loop_engine"),
-                "notes": f"loop_cycle={self.state.cycle_count}",
+                "asset_type": "forex" if is_forex else "crypto",
+                "notes": f"loop_cycle={self.state.cycle_count}|type={'forex' if is_forex else 'crypto'}",
             })
             self.state.last_trade_time = time.time()
             self.state.trades_placed += 1
             logger.info("loop.trade_executed", trade_id=trade.get("id"),
-                        symbol=signal["symbol"])
+                        symbol=symbol, asset_type="forex" if is_forex else "crypto",
+                        quantity=quantity)
             return trade
         except Exception:
             logger.warning("loop.execute_error", exc_info=True)
