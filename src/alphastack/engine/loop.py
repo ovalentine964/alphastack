@@ -359,7 +359,8 @@ class TradingLoop:
         """Load recent episodes, lessons, and patterns from memory."""
         stats = self._memory.stats()
         lessons = self._memory.get_lessons()
-        recent = self._memory.query_episodes(top_k=10)
+        all_eps = list(self._memory._short_term.values()) + list(self._memory._long_term.values())
+        recent = sorted(all_eps, key=lambda e: e.entry_time, reverse=True)[:10]
 
         recent_trades = []
         for ep in recent:
@@ -435,17 +436,28 @@ class TradingLoop:
 
     def _execute_trade(self, signal: dict[str, Any]) -> dict[str, Any] | None:
         """Place a trade via the trade store."""
+        # Circuit breaker: halt trading if drawdown exceeds threshold
+        if self.state.current_drawdown > 20.0:
+            logger.info("loop.circuit_breaker", drawdown=self.state.current_drawdown)
+            return None
+
         try:
+            # Safe take_profit access
+            tp = signal.get("take_profit")
+            if isinstance(tp, (list, tuple)) and tp:
+                take_profit = tp[0]
+            elif isinstance(tp, (int, float)):
+                take_profit = tp
+            else:
+                take_profit = None
+
             trade = self._trade_store.create_trade({
                 "symbol": signal["symbol"],
                 "side": "buy" if signal.get("direction") == "long" else "sell",
                 "quantity": 0.001,  # Minimal size for safety
                 "price": signal.get("entry_price"),
                 "stop_loss": signal.get("stop_loss"),
-                "take_profit": (
-                    signal["take_profit"][0]
-                    if signal.get("take_profit") else None
-                ),
+                "take_profit": take_profit,
                 "strategy_id": signal.get("strategy_id", "loop_engine"),
                 "notes": f"loop_cycle={self.state.cycle_count}",
             })
@@ -481,8 +493,13 @@ class TradingLoop:
         trades: list[dict[str, Any]],
         cycle_id: str,
     ) -> None:
-        """Update state and weights based on trade outcomes."""
-        for trade in trades:
+        """Update state and weights based on recently closed trade outcomes.
+
+        Instead of learning from just-placed trades (which have pnl=0),
+        query the trade store for recently closed trades and learn from those.
+        """
+        closed = self._trade_store.list_trades(status_filter="closed")[-10:]
+        for trade in closed:
             pnl = trade.get("pnl") or 0.0
             self.state.total_pnl += pnl
 
@@ -491,6 +508,8 @@ class TradingLoop:
                     self.state.win_streak += 1
                 else:
                     self.state.win_streak = 1
+            elif pnl == 0:
+                self.state.win_streak = 0
             elif pnl < 0:
                 if self.state.win_streak < 0:
                     self.state.win_streak -= 1
@@ -508,9 +527,9 @@ class TradingLoop:
                 self.state.current_drawdown = abs(self.state.total_pnl)
             self.state.current_drawdown = max(0.0, self.state.current_drawdown)
 
-        # Run post-trade reflection on completed trades
+        # Run post-trade reflection on closed trades
         try:
-            for trade in trades:
+            for trade in closed:
                 trade_data = {
                     **trade,
                     "direction": "long" if trade.get("side") == "buy" else "short",

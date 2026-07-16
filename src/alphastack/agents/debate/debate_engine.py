@@ -18,6 +18,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import copy
 import time
 from typing import Any
 
@@ -101,49 +102,89 @@ class DebateEngine:
         )
 
         # ---- Round 1: Bull presents case ----
-        bull_chain = self.bull.argue(
-            signal=signal,
-            market_data=market_data,
-            indicators=indicators,
-            news_sentiment=news_sentiment,
-        )
+        try:
+            bull_chain = self.bull.argue(
+                signal=signal,
+                market_data=market_data,
+                indicators=indicators,
+                news_sentiment=news_sentiment,
+            )
+        except Exception:
+            logger.warning("debate.bull_crash", exc_info=True)
+            return DebateResult(
+                verdict=DebateVerdict.REJECT,
+                reasoning="debate_agent_error",
+                bull_confidence=0.0,
+                bear_confidence=1.0,
+                transcript=[],
+            )
 
         # ---- Round 2: Bear presents case ----
-        bear_chain = self.bear.argue(
-            signal=signal,
-            market_data=market_data,
-            indicators=indicators,
-            news_sentiment=news_sentiment,
-        )
+        try:
+            bear_chain = self.bear.argue(
+                signal=signal,
+                market_data=market_data,
+                indicators=indicators,
+                news_sentiment=news_sentiment,
+            )
+        except Exception:
+            logger.warning("debate.bear_crash", exc_info=True)
+            return DebateResult(
+                verdict=DebateVerdict.REJECT,
+                reasoning="debate_agent_error",
+                bull_confidence=0.0,
+                bear_confidence=1.0,
+                transcript=[],
+            )
 
         # ---- Round 3: Cross-examination (rebuttals) ----
         # Bull rebuts bear's conclusion
-        bull_rebuttal = self.bull.argue(
-            signal=signal,
-            market_data=market_data,
-            indicators=indicators,
-            news_sentiment=news_sentiment,
-            bear_argument=bear_chain.conclusion,
-        )
+        try:
+            bull_rebuttal = self.bull.argue(
+                signal=signal,
+                market_data=market_data,
+                indicators=indicators,
+                news_sentiment=news_sentiment,
+                bear_argument=bear_chain.conclusion,
+            )
+        except Exception:
+            logger.warning("debate.bull_rebuttal_crash", exc_info=True)
+            return DebateResult(
+                verdict=DebateVerdict.REJECT,
+                reasoning="debate_agent_error",
+                bull_confidence=0.0,
+                bear_confidence=1.0,
+                transcript=[],
+            )
 
         # Bear rebuts bull's conclusion
-        bear_rebuttal = self.bear.argue(
-            signal=signal,
-            market_data=market_data,
-            indicators=indicators,
-            news_sentiment=news_sentiment,
-            bull_argument=bull_chain.conclusion,
-        )
+        try:
+            bear_rebuttal = self.bear.argue(
+                signal=signal,
+                market_data=market_data,
+                indicators=indicators,
+                news_sentiment=news_sentiment,
+                bull_argument=bull_chain.conclusion,
+            )
+        except Exception:
+            logger.warning("debate.bear_rebuttal_crash", exc_info=True)
+            return DebateResult(
+                verdict=DebateVerdict.REJECT,
+                reasoning="debate_agent_error",
+                bull_confidence=0.0,
+                bear_confidence=1.0,
+                transcript=[],
+            )
 
         # Use rebuttal confidences (they incorporate counter-arguments)
         # Blend original + rebuttal: 40% original, 60% rebuttal
-        blended_bull_chain = bull_chain
+        blended_bull_chain = copy.deepcopy(bull_chain)
         blended_bull_chain.overall_confidence = round(
             bull_chain.overall_confidence * 0.4 + bull_rebuttal.overall_confidence * 0.6,
             4,
         )
 
-        blended_bear_chain = bear_chain
+        blended_bear_chain = copy.deepcopy(bear_chain)
         blended_bear_chain.overall_confidence = round(
             bear_chain.overall_confidence * 0.4 + bear_rebuttal.overall_confidence * 0.6,
             4,

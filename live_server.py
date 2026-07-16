@@ -36,9 +36,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 # ─── Monkey-patch known bugs in src/ ──────────────────────
-import alphastack.strategy.steps.s10_confluence as _s10
-if not hasattr(_s10, '_WEIGHTS'):
-    _s10._WEIGHTS = _s10._DEFAULT_WEIGHTS
+try:
+    import alphastack.strategy.steps.s10_confluence as _s10
+    if not hasattr(_s10, '_WEIGHTS'):
+        _s10._WEIGHTS = _s10._DEFAULT_WEIGHTS
+except Exception as _mp_err:
+    logging.getLogger("alphastack.live").warning("Monkey-patch for s10_confluence failed: %s", _mp_err)
 
 # ─── Production imports ───────────────────────────────────
 from alphastack.strategy.context import AlphaStackContext, Direction
@@ -160,6 +163,7 @@ orchestrator = AlphaStackOrchestrator(
 # Signal cache
 _SIGNAL_CACHE: dict[str, Any] = {"signals": [], "ts": 0.0}
 _SIGNAL_TTL = 60
+_SIGNAL_CACHE_LOCK = asyncio.Lock()
 
 # Trading loop (initialized after helpers are defined)
 trading_loop: Optional[TradingLoop] = None
@@ -190,15 +194,15 @@ def _compute_atr(highs, lows, closes, period=14):
     return atr
 
 
-def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
-    return exchange_public.fetch_ohlcv(_sanitize_str(symbol), timeframe, limit=limit)
+async def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
+    return await asyncio.to_thread(exchange_public.fetch_ohlcv, _sanitize_str(symbol), timeframe, limit=limit)
 
 
-def _build_market_data(symbol: str) -> dict[str, Any]:
+async def _build_market_data(symbol: str) -> dict[str, Any]:
     """Fetch real market data from Binance for the pipeline."""
-    candles_1h = _fetch_ohlcv(symbol, "1h", 200)
-    candles_4h = _fetch_ohlcv(symbol, "4h", 100)
-    candles_1d = _fetch_ohlcv(symbol, "1d", 60)
+    candles_1h = await _fetch_ohlcv(symbol, "1h", 200)
+    candles_4h = await _fetch_ohlcv(symbol, "4h", 100)
+    candles_1d = await _fetch_ohlcv(symbol, "1d", 60)
 
     def extract(candles):
         return ([c[1] for c in candles], [c[2] for c in candles],
@@ -215,7 +219,7 @@ def _build_market_data(symbol: str) -> dict[str, Any]:
 
     spread_pips = 1.0
     try:
-        ob = exchange_public.fetch_order_book(symbol, 5)
+        ob = await asyncio.to_thread(exchange_public.fetch_order_book, symbol, 5)
         if ob['bids'] and ob['asks']:
             spread_pips = (ob['asks'][0][0] - ob['bids'][0][0]) / pip_size
     except Exception:
@@ -241,7 +245,7 @@ def _build_market_data(symbol: str) -> dict[str, Any]:
 async def _run_pipeline_signal(symbol: str) -> dict[str, Any]:
     """Run the 16-step pipeline directly and return a signal dict."""
     try:
-        market_data = _build_market_data(symbol)
+        market_data = await _build_market_data(symbol)
         ctx = AlphaStackContext(symbol=symbol, timeframe="1H", market_data=market_data)
         pipeline = AlphaStackPipeline(parallel=False)
         ctx = await pipeline.run(ctx)
@@ -292,7 +296,7 @@ async def _run_orchestrator(symbol: str) -> dict[str, Any]:
     to avoid LangGraph state serialization issues with nested Pydantic models.
     """
     try:
-        market_data = _build_market_data(symbol)
+        market_data = await _build_market_data(symbol)
 
         # Build initial state
         state = AlphaStackState(
@@ -399,33 +403,36 @@ def _init_trading_loop() -> TradingLoop:
 
 async def _generate_signals() -> list[dict[str, Any]]:
     """Generate signals using the pipeline, with caching."""
-    now = time.time()
-    if now - _SIGNAL_CACHE["ts"] < _SIGNAL_TTL and _SIGNAL_CACHE["signals"]:
-        return _SIGNAL_CACHE["signals"]
+    async with _SIGNAL_CACHE_LOCK:
+        now = time.time()
+        if now - _SIGNAL_CACHE["ts"] < _SIGNAL_TTL and _SIGNAL_CACHE["signals"]:
+            return _SIGNAL_CACHE["signals"]
 
-    symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
-    signals = []
+        symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+        results = await asyncio.gather(*[_run_pipeline_signal(s) for s in symbols], return_exceptions=True)
+        signals = [r for r in results if isinstance(r, dict) and r]
 
-    for sym in symbols:
-        sig = await _run_pipeline_signal(sym)
-        if sig:
-            signals.append(sig)
-
-    _SIGNAL_CACHE["signals"] = signals
-    _SIGNAL_CACHE["ts"] = now
-    return signals
+        _SIGNAL_CACHE["signals"] = signals
+        _SIGNAL_CACHE["ts"] = now
+        return signals
 
 
 # ═══════════════════════════════════════════════════════════
 # Auth helpers
 # ═══════════════════════════════════════════════════════════
 
-_JWT_SECRET = os.environ.get("ALPHASTACK_JWT_SECRET", secrets.token_urlsafe(64))
+_JWT_SECRET = os.environ.get("ALPHASTACK_JWT_SECRET")
+if not _JWT_SECRET:
+    _JWT_SECRET = hashlib.sha256(b"alphastack-dev-secret-v1").hexdigest()
+    logging.getLogger("alphastack.live").warning(
+        "ALPHASTACK_JWT_SECRET not set — using deterministic dev fallback. "
+        "Set the env var in production!"
+    )
 _JWT_ALGO = "HS256"
 
-_DEMO_USERS = {
-    "admin": hashlib.sha256("alphastack".encode()).hexdigest(),
-}
+_ADMIN_USER = os.environ.get("ALPHASTACK_ADMIN_USER", "")
+_ADMIN_HASH = os.environ.get("ALPHASTACK_ADMIN_HASH", "")
+_AUTH_CONFIGURED = bool(_ADMIN_USER and _ADMIN_HASH)
 
 
 def _create_token(sub: str, ttl_seconds: int, token_type: str = "access") -> str:
@@ -460,6 +467,7 @@ class RateLimiter:
 
 
 rate_limiter = RateLimiter()
+_LOGIN_LIMITER = RateLimiter(rpm=10, burst=3)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -509,7 +517,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AlphaStack API", version="0.2.0", lifespan=lifespan)
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+_CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+_CORS_ORIGINS = [o.strip() for o in _CORS_ORIGINS if o.strip()]
+
+app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS, allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
 
@@ -582,13 +593,19 @@ class RefreshRequest(BaseModel):
 
 
 @app.post("/api/v1/auth/login")
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request):
+    # Login-specific rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, remaining, limit, retry_after = _LOGIN_LIMITER.check(f"login:{client_ip}")
+    if not allowed:
+        raise HTTPException(429, f"Too many login attempts. Retry after {retry_after}s.")
+    if not _AUTH_CONFIGURED:
+        raise HTTPException(503, "Auth not configured — set ALPHASTACK_ADMIN_USER and ALPHASTACK_ADMIN_HASH env vars")
     uname = body.username or body.apiKey or ""
     pwd = body.password or body.apiSecret or ""
     if not uname or not pwd:
         raise HTTPException(400, "Missing credentials")
-    expected = _DEMO_USERS.get(uname)
-    if expected is None or not hmac.compare_digest(expected, hashlib.sha256(pwd.encode()).hexdigest()):
+    if uname != _ADMIN_USER or not hmac.compare_digest(_ADMIN_HASH, hashlib.sha256(pwd.encode()).hexdigest()):
         raise HTTPException(401, "Invalid credentials")
     access = _create_token(uname, 1800, "access")
     refresh = _create_token(uname, 86400 * 7, "refresh")
@@ -685,7 +702,8 @@ async def create_trade(body: TradeCreate):
         try:
             # Sanitize symbol to prevent encoding errors in request signing
             safe_symbol = _sanitize_str(body.symbol)
-            order = exchange_testnet.create_order(
+            order = await asyncio.to_thread(
+                exchange_testnet.create_order,
                 symbol=safe_symbol, type='market', side=body.side, amount=body.quantity,
             )
             trade["broker_order_id"] = order.get("id", "")
@@ -735,7 +753,7 @@ async def portfolio_positions():
     for t in open_trades:
         entry = t.get("entry_price") or 0
         try:
-            ticker = exchange_public.fetch_ticker(t["symbol"])
+            ticker = await asyncio.to_thread(exchange_public.fetch_ticker, t["symbol"])
             current = ticker['last']
         except Exception:
             current = entry * 1.005
@@ -905,6 +923,43 @@ async def analytics_risk():
 # TRADING LOOP ENDPOINTS (continuous loop engine)
 # ═══════════════════════════════════════════════════════════
 
+class NotificationSettings(BaseModel):
+    email_enabled: Optional[bool] = None
+    push_enabled: Optional[bool] = None
+    signal_alerts: Optional[bool] = None
+    trade_alerts: Optional[bool] = None
+
+
+class DisplaySettings(BaseModel):
+    theme: Optional[str] = None
+    language: Optional[str] = None
+    timezone: Optional[str] = None
+    currency: Optional[str] = None
+
+
+class RiskSettings(BaseModel):
+    max_position_size_pct: Optional[float] = None
+    max_daily_loss_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+    auto_stop_loss: Optional[bool] = None
+
+
+class TradingSettings(BaseModel):
+    default_order_type: Optional[str] = None
+    confirmation_required: Optional[bool] = None
+    paper_trading: Optional[bool] = None
+
+
+class SettingsSectionUpdate(BaseModel):
+    notifications: Optional[NotificationSettings] = None
+    display: Optional[DisplaySettings] = None
+    risk: Optional[RiskSettings] = None
+    trading: Optional[TradingSettings] = None
+
+    class Config:
+        extra = "forbid"
+
+
 class LoopConfigUpdate(BaseModel):
     interval: Optional[str] = None
     symbols: Optional[list[str]] = None
@@ -977,7 +1032,7 @@ async def agi_lessons(symbol: str = None):
 @app.post("/api/v1/agi/plan")
 async def agi_create_plan(symbol: str = "BTC/USDT", horizon_days: int = 5):
     try:
-        ticker = exchange_public.fetch_ticker(symbol)
+        ticker = await asyncio.to_thread(exchange_public.fetch_ticker, symbol)
         price = ticker['last']
     except Exception:
         price = 65000
@@ -1000,31 +1055,34 @@ async def agi_list_plans():
 @app.get("/api/v1/market/ticker/{symbol:path}")
 async def market_ticker(symbol: str):
     try:
-        t = exchange_public.fetch_ticker(symbol)
+        t = await asyncio.to_thread(exchange_public.fetch_ticker, symbol)
         return {"symbol": symbol, "price": t['last'], "change_24h": t.get('percentage', 0),
                 "volume_24h": t.get('quoteVolume', 0), "high_24h": t.get('high', 0), "low_24h": t.get('low', 0)}
     except Exception as e:
         return {"symbol": symbol, "price": 0, "error": str(e)}
 
 
+async def _fetch_ticker(sym: str) -> dict:
+    """Fetch a single ticker from Binance (used for parallel gathering)."""
+    try:
+        t = await asyncio.to_thread(exchange_public.fetch_ticker, sym)
+        return {"symbol": sym, "price": t['last'], "change_24h": t.get('percentage', 0)}
+    except Exception:
+        return {"symbol": sym, "price": 0}
+
+
 @app.get("/api/v1/market/tickers")
 async def market_tickers():
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'LINK/USDT', 'ADA/USDT']
-    results = []
-    for sym in symbols:
-        try:
-            t = exchange_public.fetch_ticker(sym)
-            results.append({"symbol": sym, "price": t['last'], "change_24h": t.get('percentage', 0)})
-        except Exception:
-            results.append({"symbol": sym, "price": 0})
-        await asyncio.sleep(0.1)
-    return results
+    results = await asyncio.gather(*[_fetch_ticker(s) for s in symbols], return_exceptions=True)
+    # Filter out any exceptions that slipped through (shouldn't happen with helper)
+    return [r for r in results if isinstance(r, dict)]
 
 
 @app.get("/api/v1/market/orderbook/{symbol:path}")
 async def market_orderbook(symbol: str, limit: int = 10):
     try:
-        ob = exchange_public.fetch_order_book(symbol, limit)
+        ob = await asyncio.to_thread(exchange_public.fetch_order_book, symbol, limit)
         return {"symbol": symbol, "bids": ob['bids'][:limit], "asks": ob['asks'][:limit]}
     except Exception as e:
         raise HTTPException(400, str(e))
@@ -1033,7 +1091,7 @@ async def market_orderbook(symbol: str, limit: int = 10):
 @app.get("/api/v1/market/candles/{symbol:path}")
 async def market_candles(symbol: str, timeframe: str = "1h", limit: int = 100):
     try:
-        candles = exchange_public.fetch_ohlcv(symbol, timeframe, limit=limit)
+        candles = await asyncio.to_thread(exchange_public.fetch_ohlcv, symbol, timeframe, limit=limit)
         return {"symbol": symbol, "timeframe": timeframe,
                 "candles": [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles]}
     except Exception as e:
@@ -1058,10 +1116,12 @@ async def get_settings():
 
 
 @app.put("/api/v1/settings")
-async def update_settings(body: dict):
-    for section in ("notifications", "display", "risk", "trading"):
-        if section in body:
-            _SETTINGS[section].update(body[section])
+async def update_settings(body: SettingsSectionUpdate):
+    for section_name in ("notifications", "display", "risk", "trading"):
+        section = getattr(body, section_name, None)
+        if section is not None:
+            updates = {k: v for k, v in section.model_dump().items() if v is not None}
+            _SETTINGS[section_name].update(updates)
     return {"message": "Settings updated", "settings": _SETTINGS}
 
 
@@ -1075,7 +1135,7 @@ _START_TIME = time.time()
 @app.get("/health")
 async def health():
     try:
-        ticker = exchange_public.fetch_ticker('BTC/USDT')
+        ticker = await asyncio.to_thread(exchange_public.fetch_ticker, 'BTC/USDT')
         binance_ok = True
         btc_price = ticker['last']
     except Exception:
@@ -1103,8 +1163,7 @@ async def exchange_settings():
 # ═══════════════════════════════════════════════════════════
 
 class TelegramConfigRequest(BaseModel):
-    bot_token: Optional[str] = None
-    chat_id: Optional[str] = None
+    pass
 
 
 @app.get("/api/v1/config/telegram")
@@ -1118,33 +1177,34 @@ async def get_telegram_config():
 
 @app.post("/api/v1/config/telegram")
 async def set_telegram_config(body: TelegramConfigRequest):
-    global _telegram_bot
-    if body.bot_token:
-        os.environ["TELEGRAM_BOT_TOKEN"] = body.bot_token
-    if body.chat_id:
-        os.environ["TELEGRAM_CHAT_ID"] = body.chat_id
+    """Return current telegram config status. Tokens can only be set via environment variables."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    configured = bool(bot_token and chat_id)
 
-    # Restart bot with new config
-    if _telegram_bot:
-        await _telegram_bot.stop()
-        _telegram_bot = None
-        set_telegram_bot(None)
+    if configured and _telegram_bot is None:
+        # Bot not running yet but env vars are set — start it
+        global _telegram_bot
+        tg_config = TelegramConfig()
+        if tg_config.is_configured:
+            _telegram_bot = AlphaTelegramBot(
+                config=tg_config,
+                trade_store=trade_store,
+                signal_store=signal_store,
+                portfolio_service=portfolio_service,
+                exchange_public=exchange_public,
+                generate_signals=_generate_signals,
+            )
+            set_telegram_bot(_telegram_bot)
+            asyncio.create_task(_telegram_bot.start())
+            return {"message": "Telegram bot configured and starting", "configured": True}
 
-    tg_config = TelegramConfig()
-    if tg_config.is_configured:
-        _telegram_bot = AlphaTelegramBot(
-            config=tg_config,
-            trade_store=trade_store,
-            signal_store=signal_store,
-            portfolio_service=portfolio_service,
-            exchange_public=exchange_public,
-            generate_signals=_generate_signals,
-        )
-        set_telegram_bot(_telegram_bot)
-        asyncio.create_task(_telegram_bot.start())
-        return {"message": "Telegram bot configured and starting", "configured": True}
-
-    return {"message": "Incomplete config — provide both bot_token and chat_id", "configured": False}
+    return {
+        "message": "Telegram status retrieved. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables to configure." if not configured else "Telegram bot is running.",
+        "configured": configured,
+        "bot_token_set": bool(bot_token),
+        "chat_id_set": bool(chat_id),
+    }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1154,13 +1214,22 @@ async def set_telegram_config(body: TelegramConfigRequest):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    try:
+        _decode_token(token)
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid or expired token")
+        return
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'LINK/USDT']
     try:
         await websocket.send_json({"type": "connected", "data": {"message": "Live Binance feed"}})
         while True:
             for sym in symbols:
                 try:
-                    ticker = exchange_public.fetch_ticker(sym)
+                    ticker = await asyncio.to_thread(exchange_public.fetch_ticker, sym)
                     await websocket.send_json({
                         "type": "price_update",
                         "data": {"symbol": sym, "price": ticker['last'],

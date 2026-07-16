@@ -298,8 +298,8 @@ class PreTradeReflection(AlphaStackAgent):
                     new_sl = entry + new_distance  # Short: SL above entry
                 object.__setattr__(signal, "stop_loss", round(new_sl, 6))
             elif sl is not None:
-                # Fallback: no entry price, use proportional adjustment
-                object.__setattr__(signal, "stop_loss", round(sl * sl_factor, 6))
+                # No entry price — cannot compute distance-based adjustment safely
+                pass
 
             # Store size factor for risk agent to pick up
             verdict["applied_modifications"] = {

@@ -81,8 +81,8 @@ class StrategyAgent(AlphaStackAgent):
             pipeline_output = ctx.model_dump() if hasattr(ctx, "model_dump") else {}
 
             # Generate signal from pipeline output
-            confluence = pipeline_output.get("confluence_score", 0.0)
-            bias = pipeline_output.get("bias", "flat")
+            confluence = pipeline_output.get("confluence", {}).get("score", 0.0)
+            bias = pipeline_output.get("bias", {}).get("bias", "flat")
 
             # Apply news risk adjustment (reduce signal strength on high-impact news)
             adjusted_strength = confluence
