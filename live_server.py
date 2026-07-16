@@ -498,19 +498,22 @@ async def lifespan(app: FastAPI):
     logger.info("api_startup.trading_loop_initialized")
 
     # Start Telegram bot if configured
-    tg_config = TelegramConfig()
-    if tg_config.is_configured:
-        _telegram_bot = AlphaTelegramBot(
-            config=tg_config,
-            trade_store=trade_store,
-            signal_store=signal_store,
-            portfolio_service=portfolio_service,
-            exchange_public=exchange_public,
-            generate_signals=_generate_signals,
-        )
-        set_telegram_bot(_telegram_bot)
-        asyncio.create_task(_telegram_bot.start())
-        logger.info("telegram_bot.starting")
+    try:
+        tg_config = TelegramConfig()
+        if tg_config.is_configured:
+            _telegram_bot = AlphaTelegramBot(
+                config=tg_config,
+                trade_store=trade_store,
+                signal_store=signal_store,
+                portfolio_service=portfolio_service,
+                exchange_public=exchange_public,
+                generate_signals=_generate_signals,
+            )
+            set_telegram_bot(_telegram_bot)
+            asyncio.create_task(_telegram_bot.start())
+            logger.info("telegram_bot.starting")
+    except Exception as e:
+        logger.warning("telegram_bot_init_failed", error=str(e))
 
     yield
 
@@ -1191,6 +1194,8 @@ _START_TIME = time.time()
 @app.get("/health")
 async def health():
     try:
+        if exchange_public is None:
+            raise RuntimeError("exchange not initialized")
         ticker = await asyncio.to_thread(exchange_public.fetch_ticker, 'BTC/USDT')
         binance_ok = True
         btc_price = ticker['last']
@@ -1234,13 +1239,13 @@ async def get_telegram_config():
 @app.post("/api/v1/config/telegram")
 async def set_telegram_config(body: TelegramConfigRequest):
     """Return current telegram config status. Tokens can only be set via environment variables."""
+    global _telegram_bot
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     configured = bool(bot_token and chat_id)
 
     if configured and _telegram_bot is None:
         # Bot not running yet but env vars are set — start it
-        global _telegram_bot
         tg_config = TelegramConfig()
         if tg_config.is_configured:
             _telegram_bot = AlphaTelegramBot(
