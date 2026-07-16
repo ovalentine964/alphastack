@@ -46,10 +46,23 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.graph import END, StateGraph
-from langgraph.types import interrupt
+try:
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langgraph.graph import END, StateGraph
+    from langgraph.types import interrupt
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
+    # Fallback: define stubs so the module can be imported
+    class _Stub:
+        def __getattr__(self, name): raise ImportError(f"langgraph not available: {name}")
+    StateGraph = _Stub()
+    END = "__end__"
+    interrupt = None
+    BaseCheckpointSaver = object
+    AIMessage = type('AIMessage', (), {})
+    HumanMessage = type('HumanMessage', (), {})
 
 from alphastack.agents.debate.debate_engine import DebateEngine
 from alphastack.agents.debate.risk_arbiter import DebateVerdict

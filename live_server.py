@@ -104,11 +104,15 @@ class InMemoryEventBus:
 # Global Singletons
 # ═══════════════════════════════════════════════════════════
 
-# Binance public (no keys needed)
-exchange_public = ccxt.binance({
-    'enableRateLimit': True,
-    'options': {'defaultType': 'spot'},
-})
+# Binance public (no keys needed) — wrapped in try/except for Render compatibility
+try:
+    exchange_public = ccxt.binance({
+        'enableRateLimit': True,
+        'options': {'defaultType': 'spot'},
+    })
+except Exception as e:
+    logger.warning(f"ccxt.binance init failed: {e} — using mock exchange")
+    exchange_public = None
 
 # ─── Encoding safety: strip non-ASCII chars that break latin-1 codec ───
 def _sanitize_str(val: str) -> str:
@@ -122,13 +126,16 @@ BINANCE_API_KEY = _sanitize_str(os.environ.get("BINANCE_API_KEY", ""))
 BINANCE_API_SECRET = _sanitize_str(os.environ.get("BINANCE_API_SECRET", ""))
 exchange_testnet = None
 if BINANCE_API_KEY and BINANCE_API_SECRET:
-    exchange_testnet = ccxt.binance({
-        'apiKey': BINANCE_API_KEY,
-        'secret': BINANCE_API_SECRET,
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'},
-    })
-    exchange_testnet.set_sandbox_mode(True)
+    try:
+        exchange_testnet = ccxt.binance({
+            'apiKey': BINANCE_API_KEY,
+            'secret': BINANCE_API_SECRET,
+            'enableRateLimit': True,
+            'options': {'defaultType': 'spot'},
+        })
+        exchange_testnet.set_sandbox_mode(True)
+    except Exception as e:
+        logger.warning(f"ccxt testnet init failed: {e}")
 
 # Event bus (in-memory — no Redis needed)
 event_bus = InMemoryEventBus()
@@ -199,6 +206,8 @@ def _compute_atr(highs, lows, closes, period=14):
 
 
 async def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
+    if exchange_public is None:
+        return []
     return await asyncio.to_thread(exchange_public.fetch_ohlcv, _sanitize_str(symbol), timeframe, limit=limit)
 
 
