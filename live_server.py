@@ -1309,14 +1309,17 @@ async def metrics():
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 AlphaStack LIVE Server v3.0 starting...")
-    print("📡 Connected to Binance for real market data")
-    print("💰 Trading mode: TESTNET (virtual money, real prices)")
-    print("🧠 Multi-Agent Orchestrator: ✅ 5 agents (news → strategy → risk → execution → reflection)")
-    print("📊 Strategy Pipeline: ✅ 16-step AlphaStack")
-    print("🎯 AGI Module: ✅ Episodic Memory + Trade Planner")
-    print("📡 Event Bus: In-Memory (no Redis required)")
-    print("🔒 Auth: JWT (production-grade)")
-    print("📋 Endpoints: auth, signals, trades, portfolio, analytics, market, agi, orchestrator, loop, settings")
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    try:
+        print("🚀 AlphaStack LIVE Server v3.0 starting...")
+        print(f"📡 Python {sys.version}")
+        print(f"🔑 JWT_SECRET set: {bool(os.environ.get('ALPHASTACK_JWT_SECRET'))}")
+        print(f"🌐 CORS_ORIGINS: {os.environ.get('CORS_ORIGINS', 'not set')}")
+        print(f"🤖 AI_PROVIDER: {os.environ.get('AI_PROVIDER', 'not set')}")
+        port = int(os.environ.get("PORT", 8000))
+        print(f"🔌 Port: {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        import traceback
+        print(f"\n❌ FATAL ERROR: {e}")
+        traceback.print_exc()
+        sys.exit(1)
