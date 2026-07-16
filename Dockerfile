@@ -23,4 +23,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
+COPY test_startup.py .
+RUN python3 test_startup.py
 CMD ["python3", "live_server.py"]
