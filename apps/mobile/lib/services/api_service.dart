@@ -45,7 +45,7 @@ class ApiService {
   static const String _binanceApiSecret = 'binance_api_secret';
   static const String _mimoApiKey = 'mimo_api_key';
   static const String _isTestnetKey = 'is_testnet';
-  static const String defaultBaseUrl = 'https://alphastack-dw51.onrender.com/api/v1';
+  static const String defaultBaseUrl = 'https://alphastack.fly.dev/api/v1';
 
   // Retry / timeout config
   static const int _maxRetries = 3;
