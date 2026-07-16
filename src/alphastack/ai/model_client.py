@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 PROVIDERS: dict[str, dict[str, str]] = {
     "mimo": {
         "name": "Xiaomi MiMo 2.5 Pro",
-        "default_base_url": "https://api-sgp-oc.xiaomimimo.com/v1",
+        "default_base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
         "default_model": "mimo-v2.5-pro",
     },
     "nvidia": {
@@ -82,6 +82,7 @@ PROVIDERS: dict[str, dict[str, str]] = {
 _URL_PROVIDER_MAP: list[tuple[str, str]] = [
     ("nvidia.com", "nvidia"),
     ("xiaomi.com", "mimo"),
+    ("xiaomimimo.com", "mimo"),
     ("openai.com", "openai"),
     ("anthropic.com", "anthropic"),
     ("fable.ai", "fable"),
