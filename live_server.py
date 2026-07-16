@@ -754,6 +754,15 @@ async def lifespan(app: FastAPI):
     trading_loop = _init_trading_loop()
     logger.info("api_startup.trading_loop_initialized")
 
+    # Create AI model for Telegram chat
+    _ai_model = None
+    try:
+        from alphastack.ai.model_client import AlphaModel
+        _ai_model = AlphaModel()
+        logger.info("ai_model.initialized", provider=_ai_model.provider)
+    except Exception as e:
+        logger.warning(f"ai_model.init_failed: {e}")
+
     # Start Telegram bot if configured
     try:
         tg_config = TelegramConfig()
@@ -765,6 +774,7 @@ async def lifespan(app: FastAPI):
                 portfolio_service=portfolio_service,
                 exchange_public=exchange_public,
                 generate_signals=_generate_signals,
+                ai_model=_ai_model,
             )
             set_telegram_bot(_telegram_bot)
             asyncio.create_task(_telegram_bot.start())
@@ -1590,6 +1600,12 @@ async def set_telegram_config(body: TelegramConfigRequest):
         # Bot not running yet but env vars are set — start it
         tg_config = TelegramConfig()
         if tg_config.is_configured:
+            _ai_model = None
+            try:
+                from alphastack.ai.model_client import AlphaModel
+                _ai_model = AlphaModel()
+            except Exception:
+                pass
             _telegram_bot = AlphaTelegramBot(
                 config=tg_config,
                 trade_store=trade_store,
@@ -1597,6 +1613,7 @@ async def set_telegram_config(body: TelegramConfigRequest):
                 portfolio_service=portfolio_service,
                 exchange_public=exchange_public,
                 generate_signals=_generate_signals,
+                ai_model=_ai_model,
             )
             set_telegram_bot(_telegram_bot)
             asyncio.create_task(_telegram_bot.start())

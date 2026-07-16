@@ -355,12 +355,13 @@ class AlphaModel:
         prompt = json.dumps(trade, default=str, ensure_ascii=False)
         return await self._chat(system, prompt)
 
-    async def chat(self, message: str) -> str:
+    async def chat(self, message: str, system: str | None = None) -> str:
         """General conversation (e.g. Telegram responses)."""
-        system = (
-            "You are AlphaStack AI, a quantitative trading assistant. "
-            "Be helpful, concise, and knowledgeable about markets and trading."
-        )
+        if system is None:
+            system = (
+                "You are AlphaStack AI, a quantitative trading assistant. "
+                "Be helpful, concise, and knowledgeable about markets and trading."
+            )
         return await self._chat(system, message)
 
     async def is_available(self) -> bool:

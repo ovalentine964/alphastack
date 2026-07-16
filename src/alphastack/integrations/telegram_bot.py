@@ -120,6 +120,7 @@ class AlphaTelegramBot:
         portfolio_service: "PortfolioService | None" = None,
         exchange_public: Any = None,
         generate_signals: Any = None,
+        ai_model: Any = None,
     ) -> None:
         self.config = config
         self.trade_store = trade_store
@@ -127,6 +128,7 @@ class AlphaTelegramBot:
         self.portfolio_service = portfolio_service
         self.exchange_public = exchange_public
         self._generate_signals = generate_signals
+        self._ai_model = ai_model
 
         self._queue = NotificationQueue()
         self._app: Application | None = None
@@ -430,18 +432,63 @@ class AlphaTelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _cmd_fallback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        """Free-text message → Alpha reasoning response."""
+        """Free-text message → AI-powered conversational response."""
         if not self._check_auth(update):
             await update.message.reply_text("⛔ Unauthorized.")
             return
         user_msg = update.message.text
-        # Simple contextual response (no external LLM call to keep it self-contained)
-        await update.message.reply_text(
-            f"🧠 *Alpha received:*\n_{user_msg}_\n\n"
-            "I'm a trading AI — try /status, /signals, /portfolio, or /market for actionable info.\n"
-            "For deeper reasoning, use the AlphaStack API.",
-            parse_mode="Markdown",
+
+        # Gather market context for the AI
+        market_context = ""
+        if self.exchange_public:
+            try:
+                ticker = self.exchange_public.fetch_ticker("BTC/USDT")
+                market_context = f"BTC=${ticker['last']:,.2f} ({ticker.get('percentage', 0):+.2f}% 24h)"
+            except Exception:
+                market_context = "BTC price unavailable"
+
+        # Get portfolio context
+        portfolio_context = ""
+        if self.trade_store:
+            try:
+                open_trades = self.trade_store.list_trades(status_filter="open")
+                portfolio_context = f"{len(open_trades)} open positions"
+            except Exception:
+                pass
+
+        # Build prompt with context
+        system_prompt = (
+            f"You are AlphaStack AI, a quantitative trading assistant. "
+            f"Current market: {market_context}. Portfolio: {portfolio_context}. "
+            f"Be helpful, concise, and knowledgeable about markets and trading. "
+            f"Give actionable insights when asked about trading. Keep responses under 500 words."
         )
+
+        if self._ai_model:
+            try:
+                await update.message.reply_chat_action("typing")
+                response = await self._ai_model.chat(user_msg, system=system_prompt)
+                # Split long messages (Telegram limit:4096 chars)
+                for i in range(0, len(response), 4000):
+                    await update.message.reply_text(
+                        response[i:i+4000],
+                        parse_mode="Markdown" if i == 0 else None,
+                    )
+            except Exception as e:
+                logger.warning(f"telegram.ai_error: {e}")
+                await update.message.reply_text(
+                    f"🧠 *Alpha received:*\n_{user_msg}_\n\n"
+                    f"⚠️ AI temporarily unavailable. Try /status, /signals, or /market.",
+                    parse_mode="Markdown",
+                )
+        else:
+            # Fallback: no AI model configured
+            await update.message.reply_text(
+                f"🧠 *Alpha received:*\n_{user_msg}_\n\n"
+                "I'm a trading AI — try /status, /signals, /portfolio, or /market for actionable info.\n"
+                "AI chat not configured yet. Set AI_API_KEY to enable conversational mode.",
+                parse_mode="Markdown",
+            )
 
 
 # ═══════════════════════════════════════════════════════════
