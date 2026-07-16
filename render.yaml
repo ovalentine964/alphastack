@@ -10,5 +10,13 @@ services:
         sync: false
       - key: BINANCE_API_SECRET
         sync: false
+      - key: ALPHASTACK_JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: AI_PROVIDER
+        value: "mimo"
+      - key: AI_API_KEY
+        sync: false
     healthCheckPath: /health
     autoDeploy: true

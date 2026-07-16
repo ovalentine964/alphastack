@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
 from alphastack.agi.memory import EpisodicMemory, TradeEpisode
+from alphastack.agents.reflection.pre_trade import PreTradeReflection  # available for full pre-trade analysis
 from alphastack.agents.debate.debate_engine import DebateEngine
 from alphastack.agents.debate.risk_arbiter import DebateVerdict
 from alphastack.agents.reflection.post_trade import (
@@ -35,6 +36,10 @@ from alphastack.agents.reflection.post_trade import (
 from alphastack.utils.logger import get_logger
 
 logger = get_logger("alphastack.engine")
+
+
+# Fixed initial capital for drawdown percentage normalization
+INITIAL_CAPITAL: float = 10000.0
 
 
 # ═══════════════════════════════════════════════════════════
@@ -322,6 +327,8 @@ class TradingLoop:
                     continue
 
                 # 5. REFLECT (pre-trade check)
+                # NOTE: Full PreTradeReflection agent is available (imported) for deep
+                # analysis. The inline lightweight version below is used for performance.
                 reflect_ok = self._pre_trade_reflect(signal, memory_context)
                 if not reflect_ok:
                     continue
@@ -436,6 +443,11 @@ class TradingLoop:
 
     def _execute_trade(self, signal: dict[str, Any]) -> dict[str, Any] | None:
         """Place a trade via the trade store."""
+        # Validate entry price before executing
+        if signal.get("entry_price", 0) <= 0:
+            logger.warning("loop.invalid_entry_price", symbol=signal.get("symbol"))
+            return None
+
         # Circuit breaker: halt trading if drawdown exceeds threshold
         if self.state.current_drawdown > 20.0:
             logger.info("loop.circuit_breaker", drawdown=self.state.current_drawdown)
@@ -517,14 +529,14 @@ class TradingLoop:
                     self.state.win_streak = -1
                 self.state.cooldown_remaining = self.config.cooldown_after_loss
 
-            # Update drawdown (peak-to-trough)
+            # Update drawdown — always normalized as percentage of INITIAL_CAPITAL
             self.state.peak_pnl = max(self.state.peak_pnl, self.state.total_pnl)
             if self.state.peak_pnl > 0:
                 self.state.current_drawdown = (
-                    (self.state.peak_pnl - self.state.total_pnl) / self.state.peak_pnl * 100
+                    (self.state.peak_pnl - self.state.total_pnl) / INITIAL_CAPITAL * 100
                 )
             else:
-                self.state.current_drawdown = abs(self.state.total_pnl)
+                self.state.current_drawdown = abs(self.state.total_pnl) / INITIAL_CAPITAL * 100
             self.state.current_drawdown = max(0.0, self.state.current_drawdown)
 
         # Run post-trade reflection on closed trades

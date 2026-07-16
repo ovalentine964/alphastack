@@ -174,6 +174,10 @@ _telegram_bot: AlphaTelegramBot | None = None
 # Token store
 _ACTIVE_TOKENS: dict[str, dict] = {}
 
+# Token blocklist for logout / refresh-token rotation
+_TOKEN_BLOCKLIST: set[str] = set()
+_TOKEN_BLOCKLIST_MAX: int = 10000
+
 
 # ═══════════════════════════════════════════════════════════
 # Market Data Helpers
@@ -521,7 +525,8 @@ _CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",
 _CORS_ORIGINS = [o.strip() for o in _CORS_ORIGINS if o.strip()]
 
 app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS, allow_credentials=True,
-                   allow_methods=["*"], allow_headers=["*"])
+                   allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+                   allow_headers=["Authorization", "Content-Type"])
 
 
 # ─── Middleware ─────────────────────────────────────────────
@@ -570,9 +575,14 @@ async def auth_middleware(request: Request, call_next):
                             headers={"WWW-Authenticate": "Bearer"})
     try:
         claims = _decode_token(auth_header[7:])
+        # Check token blocklist (logout / refresh-rotation)
+        jti = claims.get("jti", "")
+        if jti and jti in _TOKEN_BLOCKLIST:
+            return JSONResponse(status_code=401, content={"detail": "Token has been revoked"},
+                                headers={"WWW-Authenticate": "Bearer"})
         request.state.user = claims
-    except Exception as exc:
-        return JSONResponse(status_code=401, content={"detail": f"Invalid token: {exc}"},
+    except Exception:
+        return JSONResponse(status_code=401, content={"detail": "Invalid token"},
                             headers={"WWW-Authenticate": "Bearer"})
     return await call_next(request)
 
@@ -621,13 +631,31 @@ async def refresh(body: RefreshRequest):
         raise HTTPException(401, "Invalid refresh token")
     if payload.get("type") != "refresh":
         raise HTTPException(400, "Not a refresh token")
+    # One-time-use: revoke old refresh token
+    old_jti = payload.get("jti", "")
+    if old_jti:
+        if len(_TOKEN_BLOCKLIST) >= _TOKEN_BLOCKLIST_MAX:
+            _TOKEN_BLOCKLIST.pop()
+        _TOKEN_BLOCKLIST.add(old_jti)
     access = _create_token(payload["sub"], 1800, "access")
     new_refresh = _create_token(payload["sub"], 86400 * 7, "refresh")
     return {"access_token": access, "refresh_token": new_refresh, "token_type": "bearer", "expires_in": 1800}
 
 
 @app.post("/api/v1/auth/logout")
-async def logout():
+async def logout(request: Request):
+    # Extract token from Authorization header and revoke its jti
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            claims = _decode_token(auth_header[7:])
+            jti = claims.get("jti", "")
+            if jti:
+                if len(_TOKEN_BLOCKLIST) >= _TOKEN_BLOCKLIST_MAX:
+                    _TOKEN_BLOCKLIST.pop()
+                _TOKEN_BLOCKLIST.add(jti)
+        except Exception:
+            pass  # Token already invalid — nothing to revoke
     return {"message": "Logged out"}
 
 
@@ -709,7 +737,8 @@ async def create_trade(body: TradeCreate):
             trade["broker_order_id"] = order.get("id", "")
             trade["status"] = "open"
         except Exception as e:
-            trade["notes"] += f" | Broker error: {e}"
+            logger.warning("broker_execution_failed", error=str(e))
+            trade["notes"] += " | Execution failed"
 
     return trade
 
@@ -1004,6 +1033,13 @@ async def loop_config_update(body: LoopConfigUpdate):
     return result
 
 
+
+
+def _validate_symbol(symbol: str) -> bool:
+    """Validate a trading pair symbol format."""
+    return "/" in symbol and len(symbol) < 20 and symbol.replace("/", "").replace("-", "").isalnum()
+
+
 # ═══════════════════════════════════════════════════════════
 # ORCHESTRATOR ENDPOINT (full multi-agent pipeline)
 # ═══════════════════════════════════════════════════════════
@@ -1011,6 +1047,8 @@ async def loop_config_update(body: LoopConfigUpdate):
 @app.post("/api/v1/orchestrator/run")
 async def run_orchestrator(symbol: str = "BTC/USDT"):
     """Trigger the full 5-agent orchestrator pipeline."""
+    if not _validate_symbol(symbol):
+        raise HTTPException(400, "Invalid symbol format")
     result = await _run_orchestrator(symbol)
     return result
 
@@ -1052,14 +1090,19 @@ async def agi_list_plans():
 # MARKET DATA ENDPOINTS
 # ═══════════════════════════════════════════════════════════
 
+
+
 @app.get("/api/v1/market/ticker/{symbol:path}")
 async def market_ticker(symbol: str):
+    if not _validate_symbol(symbol):
+        raise HTTPException(400, "Invalid symbol format")
     try:
         t = await asyncio.to_thread(exchange_public.fetch_ticker, symbol)
         return {"symbol": symbol, "price": t['last'], "change_24h": t.get('percentage', 0),
                 "volume_24h": t.get('quoteVolume', 0), "high_24h": t.get('high', 0), "low_24h": t.get('low', 0)}
     except Exception as e:
-        return {"symbol": symbol, "price": 0, "error": str(e)}
+        logger.warning("market_ticker_failed", symbol=symbol, error=str(e))
+        return {"symbol": symbol, "price": 0, "change_24h": 0, "volume_24h": 0, "high_24h": 0, "low_24h": 0}
 
 
 async def _fetch_ticker(sym: str) -> dict:
@@ -1081,6 +1124,8 @@ async def market_tickers():
 
 @app.get("/api/v1/market/orderbook/{symbol:path}")
 async def market_orderbook(symbol: str, limit: int = 10):
+    if not _validate_symbol(symbol):
+        raise HTTPException(400, "Invalid symbol format")
     try:
         ob = await asyncio.to_thread(exchange_public.fetch_order_book, symbol, limit)
         return {"symbol": symbol, "bids": ob['bids'][:limit], "asks": ob['asks'][:limit]}
@@ -1090,6 +1135,8 @@ async def market_orderbook(symbol: str, limit: int = 10):
 
 @app.get("/api/v1/market/candles/{symbol:path}")
 async def market_candles(symbol: str, timeframe: str = "1h", limit: int = 100):
+    if not _validate_symbol(symbol):
+        raise HTTPException(400, "Invalid symbol format")
     try:
         candles = await asyncio.to_thread(exchange_public.fetch_ohlcv, symbol, timeframe, limit=limit)
         return {"symbol": symbol, "timeframe": timeframe,

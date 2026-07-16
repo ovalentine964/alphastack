@@ -165,6 +165,7 @@ class EpisodicMemory:
         self._short_term: dict[str, TradeEpisode] = {}
         self._long_term: dict[str, TradeEpisode] = {}
         self._consolidation_threshold = consolidation_threshold
+        self._max_episodes: int = 500
 
     def store(self, episode: TradeEpisode) -> str:
         """Store a trade episode in short-term memory."""
@@ -172,6 +173,13 @@ class EpisodicMemory:
         # Auto-consolidate if threshold exceeded
         if len(self._short_term) > self._consolidation_threshold:
             self.consolidate()
+        # Enforce hard cap: remove lowest-impact episodes from long-term
+        total = len(self._short_term) + len(self._long_term)
+        if total > self._max_episodes and self._long_term:
+            excess = total - self._max_episodes
+            sorted_lt = sorted(self._long_term.values(), key=lambda e: e.impact_score)
+            for ep in sorted_lt[:excess]:
+                del self._long_term[ep.episode_id]
         return episode.episode_id
 
     def retrieve(self, episode_id: str) -> TradeEpisode | None:
