@@ -13,8 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app
-COPY . .
+# Copy ONLY backend files (not mobile, docs, desktop, etc.)
+COPY live_server.py .
+COPY start.py .
+COPY test_startup.py .
+COPY src/ src/
+COPY config/ config/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
