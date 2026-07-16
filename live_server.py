@@ -1207,16 +1207,27 @@ _START_TIME = time.time()
 
 @app.get("/health")
 async def health():
+    binance_ok = False
+    btc_price = 0
     try:
-        ex = _get_exchange()
-        if ex is None:
-            raise RuntimeError("exchange not initialized")
-        ticker = await asyncio.to_thread(ex.fetch_ticker, 'BTC/USDT')
-        binance_ok = True
-        btc_price = ticker['last']
-    except Exception:
-        binance_ok = False
-        btc_price = 0
+        # Direct HTTP test to Binance (bypasses ccxt)
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=10.0) as _client:
+            _resp = await _client.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": "BTCUSDT"})
+            if _resp.status_code == 200:
+                btc_price = float(_resp.json()["price"])
+                binance_ok = True
+    except Exception as e:
+        logger.warning(f"health.binance_direct failed: {e}")
+    if not binance_ok:
+        try:
+            ex = _get_exchange()
+            if ex:
+                ticker = await asyncio.to_thread(ex.fetch_ticker, 'BTC/USDT')
+                btc_price = ticker['last']
+                binance_ok = True
+        except Exception as e:
+            logger.warning(f"health.binance_ccxt failed: {e}")
     return {
         "status": "ok", "version": "0.1.0",
         "uptime_seconds": round(time.time() - _START_TIME, 2),
