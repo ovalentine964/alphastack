@@ -1,7 +1,7 @@
 name: alphastack_mobile
 description: AlphaStack - AI-Powered Quantitative Trading Platform
 publish_to: 'none'
-version: 1.0.0+3
+version: 0.1.0+1
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
