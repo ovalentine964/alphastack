@@ -25,4 +25,4 @@ EXPOSE 8000
 
 COPY test_startup.py .
 RUN python3 test_startup.py
-CMD ["gunicorn", "live_server:app", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--preload"]
+CMD ["python", "start.py"]
