@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 PROVIDERS: dict[str, dict[str, str]] = {
     "mimo": {
         "name": "Xiaomi MiMo 2.5 Pro",
-        "default_base_url": "https://api.xiaomi.com/v1",
+        "default_base_url": "https://api-sgp-oc.xiaomimimo.com/v1",
         "default_model": "mimo-v2.5-pro",
     },
     "nvidia": {
