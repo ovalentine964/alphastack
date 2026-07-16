@@ -104,15 +104,28 @@ class InMemoryEventBus:
 # Global Singletons
 # ═══════════════════════════════════════════════════════════
 
-# Binance public (no keys needed) — wrapped in try/except for Render compatibility
-try:
-    exchange_public = ccxt.binance({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'},
-    })
-except Exception as e:
-    logger.warning(f"ccxt.binance init failed: {e} — using mock exchange")
-    exchange_public = None
+# Binance public (no keys needed) — lazy init for Render compatibility
+exchange_public = None
+
+def _get_exchange():
+    """Get or create the public Binance exchange client (lazy init)."""
+    global exchange_public
+    if exchange_public is None:
+        try:
+            exchange_public = ccxt.binance({
+                'enableRateLimit': True,
+                'options': {'defaultType': 'spot'},
+                'timeout': 15000,
+            })
+            logger.info("ccxt.binance initialized successfully")
+        except Exception as e:
+            logger.warning(f"ccxt.binance init failed: {e}")
+            try:
+                exchange_public = ccxt.binance({'enableRateLimit': True, 'timeout': 30000})
+                logger.info("ccxt.binance retry succeeded")
+            except Exception as e2:
+                logger.error(f"ccxt.binance retry also failed: {e2}")
+    return exchange_public
 
 # ─── Encoding safety: strip non-ASCII chars that break latin-1 codec ───
 def _sanitize_str(val: str) -> str:
@@ -206,9 +219,10 @@ def _compute_atr(highs, lows, closes, period=14):
 
 
 async def _fetch_ohlcv(symbol, timeframe="1h", limit=200):
-    if exchange_public is None:
+    ex = _get_exchange()
+    if ex is None:
         return []
-    return await asyncio.to_thread(exchange_public.fetch_ohlcv, _sanitize_str(symbol), timeframe, limit=limit)
+    return await asyncio.to_thread(ex.fetch_ohlcv, _sanitize_str(symbol), timeframe, limit=limit)
 
 
 async def _build_market_data(symbol: str) -> dict[str, Any]:
@@ -232,7 +246,7 @@ async def _build_market_data(symbol: str) -> dict[str, Any]:
 
     spread_pips = 1.0
     try:
-        ob = await asyncio.to_thread(exchange_public.fetch_order_book, symbol, 5)
+        ob = await asyncio.to_thread(_get_exchange().fetch_order_book, symbol, 5)
         if ob['bids'] and ob['asks']:
             spread_pips = (ob['asks'][0][0] - ob['bids'][0][0]) / pip_size
     except Exception:
@@ -794,7 +808,7 @@ async def portfolio_positions():
     for t in open_trades:
         entry = t.get("entry_price") or 0
         try:
-            ticker = await asyncio.to_thread(exchange_public.fetch_ticker, t["symbol"])
+            ticker = await asyncio.to_thread(_get_exchange().fetch_ticker, t["symbol"])
             current = ticker['last']
         except Exception:
             current = entry * 1.005
@@ -1082,7 +1096,7 @@ async def agi_lessons(symbol: str = None):
 @app.post("/api/v1/agi/plan")
 async def agi_create_plan(symbol: str = "BTC/USDT", horizon_days: int = 5):
     try:
-        ticker = await asyncio.to_thread(exchange_public.fetch_ticker, symbol)
+        ticker = await asyncio.to_thread(_get_exchange().fetch_ticker, symbol)
         price = ticker['last']
     except Exception:
         price = 65000
@@ -1109,7 +1123,7 @@ async def market_ticker(symbol: str):
     if not _validate_symbol(symbol):
         raise HTTPException(400, "Invalid symbol format")
     try:
-        t = await asyncio.to_thread(exchange_public.fetch_ticker, symbol)
+        t = await asyncio.to_thread(_get_exchange().fetch_ticker, symbol)
         return {"symbol": symbol, "price": t['last'], "change_24h": t.get('percentage', 0),
                 "volume_24h": t.get('quoteVolume', 0), "high_24h": t.get('high', 0), "low_24h": t.get('low', 0)}
     except Exception as e:
@@ -1120,7 +1134,7 @@ async def market_ticker(symbol: str):
 async def _fetch_ticker(sym: str) -> dict:
     """Fetch a single ticker from Binance (used for parallel gathering)."""
     try:
-        t = await asyncio.to_thread(exchange_public.fetch_ticker, sym)
+        t = await asyncio.to_thread(_get_exchange().fetch_ticker, sym)
         return {"symbol": sym, "price": t['last'], "change_24h": t.get('percentage', 0)}
     except Exception:
         return {"symbol": sym, "price": 0}
@@ -1139,7 +1153,7 @@ async def market_orderbook(symbol: str, limit: int = 10):
     if not _validate_symbol(symbol):
         raise HTTPException(400, "Invalid symbol format")
     try:
-        ob = await asyncio.to_thread(exchange_public.fetch_order_book, symbol, limit)
+        ob = await asyncio.to_thread(_get_exchange().fetch_order_book, symbol, limit)
         return {"symbol": symbol, "bids": ob['bids'][:limit], "asks": ob['asks'][:limit]}
     except Exception as e:
         raise HTTPException(400, str(e))
@@ -1150,7 +1164,7 @@ async def market_candles(symbol: str, timeframe: str = "1h", limit: int = 100):
     if not _validate_symbol(symbol):
         raise HTTPException(400, "Invalid symbol format")
     try:
-        candles = await asyncio.to_thread(exchange_public.fetch_ohlcv, symbol, timeframe, limit=limit)
+        candles = await asyncio.to_thread(_get_exchange().fetch_ohlcv, symbol, timeframe, limit=limit)
         return {"symbol": symbol, "timeframe": timeframe,
                 "candles": [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles]}
     except Exception as e:
@@ -1194,9 +1208,10 @@ _START_TIME = time.time()
 @app.get("/health")
 async def health():
     try:
-        if exchange_public is None:
+        ex = _get_exchange()
+        if ex is None:
             raise RuntimeError("exchange not initialized")
-        ticker = await asyncio.to_thread(exchange_public.fetch_ticker, 'BTC/USDT')
+        ticker = await asyncio.to_thread(ex.fetch_ticker, 'BTC/USDT')
         binance_ok = True
         btc_price = ticker['last']
     except Exception:
@@ -1290,7 +1305,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             for sym in symbols:
                 try:
-                    ticker = await asyncio.to_thread(exchange_public.fetch_ticker, sym)
+                    ticker = await asyncio.to_thread(_get_exchange().fetch_ticker, sym)
                     await websocket.send_json({
                         "type": "price_update",
                         "data": {"symbol": sym, "price": ticker['last'],
