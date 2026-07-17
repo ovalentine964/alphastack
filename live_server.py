@@ -199,6 +199,7 @@ _TOKEN_BLOCKLIST_MAX: int = 10000
 _FOREX_PAIRS = {
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD",
     "NZD/USD", "USD/CAD", "EUR/GBP", "EUR/JPY", "GBP/JPY",
+    "XAU/USD", "XAU/EUR", "XAG/USD",  # Gold & Silver
 }
 
 
@@ -639,7 +640,7 @@ async def _run_orchestrator(symbol: str) -> dict[str, Any]:
 def _init_trading_loop() -> TradingLoop:
     """Create the TradingLoop singleton wired to existing singletons."""
     cfg = LoopConfig(interval=Interval.H4, symbols=['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
-                      forex_symbols=['EUR/USD', 'GBP/USD', 'USD/JPY'],
+                      forex_symbols=['EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD', 'XAG/USD'],
                       forex_enabled=bool(os.environ.get("OANDA_API_TOKEN")))
     return TradingLoop(
         config=cfg,
@@ -1408,7 +1409,7 @@ async def market_tickers():
     symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'LINK/USDT', 'ADA/USDT']
     # Add forex pairs if OANDA is available
     if oanda_connector and oanda_connector.is_connected:
-        symbols.extend(['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CHF'])
+        symbols.extend(['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CHF', 'XAU/USD', 'XAG/USD'])
     results = await asyncio.gather(*[_fetch_ticker(s) for s in symbols], return_exceptions=True)
     return [r for r in results if isinstance(r, dict)]
 
