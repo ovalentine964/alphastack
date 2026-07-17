@@ -26,19 +26,9 @@ jobs:
         working-directory: apps/mobile
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
-      - name: Setup signing keystore
-        working-directory: apps/mobile/android/app
-        run: |
-          # Generate a debug keystore for CI builds
-          keytool -genkey -v -keystore release.keystore -alias alphastack -keyalg RSA -keysize 2048 -validity 10000 -storepass alphastack123 -keypass alphastack123 -dname "CN=AlphaStack, OU=Dev, O=AlphaStack, L=Nairobi, ST=Kenya, C=KE"
-          echo "KEYSTORE_PATH=${{ github.workspace }}/apps/mobile/android/app/release.keystore" >> $GITHUB_ENV
-          echo "KEYSTORE_PASSWORD=alphastack123" >> $GITHUB_ENV
-          echo "KEY_ALIAS=alphastack" >> $GITHUB_ENV
-          echo "KEY_PASSWORD=alphastack123" >> $GITHUB_ENV
-
       - name: Build Release APK
         working-directory: apps/mobile
-        run: flutter build apk --release
+        run: flutter build apk --debug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
