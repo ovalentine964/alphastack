@@ -147,6 +147,9 @@ def resolve_config(
         or os.environ.get("MIMO_API_KEY")  # backward compat
         or ""
     )
+    # Sanitize key: strip non-ASCII chars (e.g. U+2026 ellipsis) that corrupt auth
+    if resolved_key:
+        resolved_key = resolved_key.encode('ascii', 'ignore').decode('ascii').strip()
 
     # --- Base URL ---
     resolved_url = (
@@ -384,8 +387,16 @@ class AlphaModel:
             client = await self._get_client()
             # Try /models endpoint (works for most OpenAI-compatible APIs)
             resp = await client.get("/models", timeout=5.0)
-            # Reject 401/403 as unavailable (bad key)
-            self._available = 200 <= resp.status_code < 500
+            # Only 2xx means available; 401/403 = bad key, 5xx = server down
+            self._available = 200 <= resp.status_code < 300
+            if not self._available:
+                logger.warning(
+                    "alphamodel.provider_rejected",
+                    provider=self._provider,
+                    status=resp.status_code,
+                    has_key=bool(self._api_key),
+                    key_len=len(self._api_key) if self._api_key else 0,
+                )
         except Exception:
             self._available = False
         self._available_set_at = time.time()
@@ -405,8 +416,8 @@ class AlphaModel:
 
         # Check availability
         if not await self.is_available():
-            logger.warning("alphamodel.unavailable", provider=self._provider, fallback=True)
-            return self._fallback(system, user)
+            logger.warning("alphamodel.unavailable", provider=self._provider, has_key=bool(self._api_key), fallback=True)
+            return self._fallback(system, user, has_key=bool(self._api_key))
 
         # Rate limit
         await self._limiter.acquire()
@@ -414,7 +425,7 @@ class AlphaModel:
         # Call API with retries
         response_text = await self._request_with_retry(system, user)
         if response_text is None:
-            return self._fallback(system, user)
+            return self._fallback(system, user, has_key=bool(self._api_key))
 
         # Cache result
         self._cache[cache_key] = _CacheEntry(response=response_text)
@@ -531,7 +542,7 @@ class AlphaModel:
         return None
 
     @staticmethod
-    def _fallback(system: str, user: str) -> str:
+    def _fallback(system: str, user: str, has_key: bool = True) -> str:
         """Heuristic fallback when AI provider is unavailable."""
         text = user.lower()
         if any(w in text for w in ("bull", "buy", "long", "uptrend")):
@@ -540,7 +551,9 @@ class AlphaModel:
             return "[fallback] Bearish signal detected via keyword matching. Technical indicators suggest downward pressure. Consider short entry or reduce exposure."
         if any(w in text for w in ("risk", "stop", "loss")):
             return "[fallback] Risk management check: ensure position size ≤2% of portfolio, stop-loss at 2x ATR, and risk/reward ratio ≥1.5."
-        return "[fallback] AI provider unavailable. Using basic heuristic analysis. Configure AI_API_KEY for full AI reasoning."
+        if not has_key:
+            return "[fallback] AI provider unavailable. Using basic heuristic analysis. Configure AI_API_KEY for full AI reasoning."
+        return "[fallback] AI provider temporarily unavailable — using heuristic analysis. The system will retry automatically."
 
     @staticmethod
     def _cache_key(system: str, user: str) -> str:

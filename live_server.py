@@ -753,7 +753,26 @@ async def lifespan(app: FastAPI):
     try:
         from alphastack.ai.model_client import AlphaModel
         _ai_model = AlphaModel()
-        logger.info("ai_model.initialized", provider=_ai_model.provider)
+        logger.info("ai_model.initialized", provider=_ai_model.provider,
+                     model=_ai_model.model, has_key=bool(_ai_model._api_key),
+                     key_len=len(_ai_model._api_key) if _ai_model._api_key else 0)
+        # Validate key on startup (non-blocking — logs result)
+        async def _validate_ai_key():
+            try:
+                avail = await _ai_model.is_available()
+                if avail:
+                    logger.info("ai_model.key_valid", provider=_ai_model.provider)
+                else:
+                    logger.error(
+                        "ai_model.key_invalid",
+                        provider=_ai_model.provider,
+                        base_url=_ai_model.base_url,
+                        has_key=bool(_ai_model._api_key),
+                        key_preview=_ai_model._api_key[:12] + "..." if _ai_model._api_key and len(_ai_model._api_key) > 12 else _ai_model._api_key,
+                    )
+            except Exception as e:
+                logger.error("ai_model.validation_failed", error=str(e))
+        asyncio.create_task(_validate_ai_key())
     except Exception as e:
         logger.warning(f"ai_model.init_failed: {e}")
 
