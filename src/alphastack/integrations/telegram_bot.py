@@ -139,12 +139,8 @@ class AlphaTelegramBot:
 
     # ── Lifecycle ──────────────────────────────────────────
 
-    async def start(self) -> None:
-        """Build and start the Telegram application.
-
-        Uses webhooks if TELEGRAM_WEBHOOK_URL is set (production — works with multiple machines).
-        Falls back to polling if no webhook URL (development — single machine only).
-        """
+    async def init(self) -> None:
+        """Initialize the Telegram application (call before get_webhook_app)."""
         if not self.config.is_configured:
             logger.info("telegram.skipped — token or chat_id not set")
             return
@@ -180,6 +176,16 @@ class AlphaTelegramBot:
 
         await self._app.initialize()
         await self._app.start()
+        logger.info("telegram.app_initialized")
+
+    async def start(self) -> None:
+        """Start the Telegram bot polling or webhook.
+
+        Call init() first, then get_webhook_app() if needed, then start().
+        """
+        if not self._app:
+            logger.info("telegram.skipped — app not initialized")
+            return
 
         if self.config.webhook_url:
             # Production: webhook mode — register URL with Telegram, handle via FastAPI
