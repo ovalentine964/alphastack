@@ -184,12 +184,20 @@ class AlphaTelegramBot:
         if self.config.webhook_url:
             # Production: webhook mode — works with multiple machines
             webhook_path = "/webhook/telegram"
-            await self._app.updater.start_webhook(
-                url_path=webhook_path,
-                webhook_url=f"{self.config.webhook_url}{webhook_path}",
-                drop_pending_updates=True,
-            )
-            logger.info("telegram.started_webhook", url=self.config.webhook_url)
+            try:
+                await self._app.updater.start_webhook(
+                    url_path=webhook_path,
+                    webhook_url=f"{self.config.webhook_url}{webhook_path}",
+                    drop_pending_updates=True,
+                )
+                logger.info("telegram.started_webhook", url=self.config.webhook_url)
+            except RuntimeError as e:
+                if "webhooks" in str(e).lower():
+                    logger.warning("telegram.webhook_extra_missing", error=str(e), fallback="polling")
+                    await self._app.updater.start_polling(drop_pending_updates=True)
+                    logger.info("telegram.started_polling_fallback")
+                else:
+                    raise
         else:
             # Development: polling mode — single machine only
             await self._app.updater.start_polling(drop_pending_updates=True)
