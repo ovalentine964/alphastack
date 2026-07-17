@@ -207,12 +207,21 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
     final api = ApiService();
     final baseUrl = await api.baseUrl;
 
-    // If using the default localhost URL and no keys stored, show endpoint setup
+    // If backend is reachable, auto-connect without asking for keys
+    final healthy = await api.checkHealth();
+    if (healthy) {
+      await api.autoAuthenticate();
+      ref.read(connectionStatusProvider.notifier).connect();
+      if (mounted) setState(() => _ready = true);
+      _checkForUpdates();
+      return;
+    }
+
+    // Backend not reachable — show setup if no keys stored
     final hasKeys = await api.hasStoredKeys();
     final isDefaultUrl = baseUrl == ApiService.defaultBaseUrl;
 
     if (!hasKeys && isDefaultUrl) {
-      // First launch — need endpoint setup
       if (mounted) setState(() => _ready = false);
       return;
     }
@@ -338,7 +347,7 @@ class _FirstLaunchSetup extends StatefulWidget {
 }
 
 class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
-  final _urlController = TextEditingController(text: 'http://localhost:8000/api/v1');
+  final _urlController = TextEditingController(text: 'https://alphastack.fly.dev/api/v1');
   bool _isConnecting = false;
   String _statusMessage = '';
 
@@ -524,9 +533,19 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
               ),
             ),
             const SizedBox(height: 12),
-            TextButton(
-              onPressed: _isConnecting ? null : _skipForDemo,
-              child: const Text('Skip — use demo mode'),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isConnecting ? null : _skipForDemo,
+                icon: const Icon(Icons.science_rounded, size: 18),
+                label: const Text('Continue with Demo Mode'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AlphaStackApp.accentOrange,
+                  side: const BorderSide(color: AlphaStackApp.accentOrange),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
             ),
           ],
         ),
