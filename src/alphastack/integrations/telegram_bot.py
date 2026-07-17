@@ -47,9 +47,11 @@ class TelegramConfig:
         bot_token: str | None = None,
         chat_id: str | None = None,
         allowed_chat_ids: list[str] | None = None,
+        webhook_url: str | None = None,
     ) -> None:
         self.bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
         self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+        self.webhook_url = webhook_url or os.environ.get("TELEGRAM_WEBHOOK_URL", "")
         # Parse allowed chat IDs from env (comma-separated)
         if allowed_chat_ids is not None:
             self.allowed_chat_ids = [str(cid) for cid in allowed_chat_ids]
@@ -138,7 +140,11 @@ class AlphaTelegramBot:
     # ── Lifecycle ──────────────────────────────────────────
 
     async def start(self) -> None:
-        """Build and start the Telegram application (polling mode)."""
+        """Build and start the Telegram application.
+
+        Uses webhooks if TELEGRAM_WEBHOOK_URL is set (production — works with multiple machines).
+        Falls back to polling if no webhook URL (development — single machine only).
+        """
         if not self.config.is_configured:
             logger.info("telegram.skipped — token or chat_id not set")
             return
@@ -174,11 +180,29 @@ class AlphaTelegramBot:
 
         await self._app.initialize()
         await self._app.start()
-        await self._app.updater.start_polling(drop_pending_updates=True)
+
+        if self.config.webhook_url:
+            # Production: webhook mode — works with multiple machines
+            webhook_path = "/webhook/telegram"
+            await self._app.updater.start_webhook(
+                url_path=webhook_path,
+                webhook_url=f"{self.config.webhook_url}{webhook_path}",
+                drop_pending_updates=True,
+            )
+            logger.info("telegram.started_webhook", url=self.config.webhook_url)
+        else:
+            # Development: polling mode — single machine only
+            await self._app.updater.start_polling(drop_pending_updates=True)
+            logger.info("telegram.started_polling")
 
         self._running = True
         self._flush_task = asyncio.create_task(self._flush_loop())
-        logger.info("telegram.started — polling active")
+
+    def get_webhook_app(self):
+        """Return the ASGI webhook app for integration with FastAPI."""
+        if self._app and self.config.webhook_url:
+            return self._app.updater.webhook_app()
+        return None
 
     async def stop(self) -> None:
         """Gracefully stop the bot."""

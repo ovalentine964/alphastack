@@ -794,6 +794,13 @@ async def lifespan(app: FastAPI):
             set_telegram_bot(_telegram_bot)
             asyncio.create_task(_telegram_bot.start())
             logger.info("telegram_bot.starting")
+
+            # Mount webhook endpoint if using webhook mode
+            if tg_config.webhook_url:
+                webhook_app = _telegram_bot.get_webhook_app()
+                if webhook_app:
+                    app.mount("/webhook/telegram", webhook_app)
+                    logger.info("telegram_bot.webhook_mounted", path="/webhook/telegram")
     except Exception as e:
         logger.warning("telegram_bot_init_failed", error=str(e))
 
