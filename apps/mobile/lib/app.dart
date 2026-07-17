@@ -205,13 +205,11 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
 
   Future<void> _bootstrap() async {
     final api = ApiService();
-    final baseUrl = await api.baseUrl;
 
     // If backend is reachable, auto-connect without asking for keys
     final healthy = await api.checkHealth();
     if (healthy) {
       await api.autoAuthenticate();
-      ref.read(connectionStatusProvider.notifier).connect();
       if (mounted) setState(() => _ready = true);
       _checkForUpdates();
       return;
@@ -219,6 +217,7 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
 
     // Backend not reachable — show setup if no keys stored
     final hasKeys = await api.hasStoredKeys();
+    final baseUrl = await api.baseUrl;
     final isDefaultUrl = baseUrl == ApiService.defaultBaseUrl;
 
     if (!hasKeys && isDefaultUrl) {
@@ -228,13 +227,7 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
 
     // Endpoint is set — try to auto-authenticate
     await api.autoAuthenticate();
-
-    // Trigger connection status provider
-    ref.read(connectionStatusProvider.notifier).connect();
-
     if (mounted) setState(() => _ready = true);
-
-    // Check for app updates
     _checkForUpdates();
   }
 
