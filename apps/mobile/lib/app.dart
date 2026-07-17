@@ -10,6 +10,10 @@ import 'services/api_service.dart';
 import 'providers/connection_status.dart';
 import 'providers/app_preferences.dart';
 
+/// Provider for the current bottom navigation tab index.
+/// Used by dashboard to navigate to other tabs.
+final currentTabProvider = StateProvider<int>((ref) => 0);
+
 class AlphaStackApp extends ConsumerWidget {
   const AlphaStackApp({super.key});
 
@@ -43,7 +47,7 @@ class AlphaStackApp extends ConsumerWidget {
       title: 'AlphaStack',
       debugShowCheckedModeBanner: false,
       theme: isDark ? _buildDarkTheme() : _buildLightTheme(),
-      home: const _AppBootstrap(),
+      home: const AppBootstrap(),
     );
   }
 
@@ -182,14 +186,14 @@ class AlphaStackApp extends ConsumerWidget {
 
 /// Bootstrap widget that checks endpoint + auth on first launch.
 /// Shows endpoint setup → auto-authenticates → main app.
-class _AppBootstrap extends ConsumerStatefulWidget {
-  const _AppBootstrap();
+class AppBootstrap extends ConsumerStatefulWidget {
+  const AppBootstrap({super.key});
 
   @override
-  ConsumerState<_AppBootstrap> createState() => _AppBootstrapState();
+  ConsumerState<AppBootstrap> createState() => _AppBootstrapState();
 }
 
-class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
+class _AppBootstrapState extends ConsumerState<AppBootstrap> {
   bool? _ready;
 
   @override
@@ -471,34 +475,29 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
   }
 }
 
-class MainNavigation extends StatefulWidget {
+class MainNavigation extends ConsumerWidget {
   const MainNavigation({super.key});
 
   @override
-  State<MainNavigation> createState() => _MainNavigationState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentIndex = ref.watch(currentTabProvider);
 
-class _MainNavigationState extends State<MainNavigation> {
-  int _currentIndex = 0;
+    final List<Widget> screens = const [
+      DashboardScreen(),
+      TradesScreen(),
+      SignalsScreen(),
+      AnalyticsScreen(),
+      SettingsScreen(),
+    ];
 
-  final List<Widget> _screens = const [
-    DashboardScreen(),
-    TradesScreen(),
-    SignalsScreen(),
-    AnalyticsScreen(),
-    SettingsScreen(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
+        index: currentIndex,
+        children: screens,
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        currentIndex: currentIndex,
+        onTap: (index) => ref.read(currentTabProvider.notifier).state = index,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_rounded),
