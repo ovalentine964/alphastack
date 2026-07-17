@@ -190,10 +190,10 @@ class AlphaTelegramBot:
                     webhook_url=f"{self.config.webhook_url}{webhook_path}",
                     drop_pending_updates=True,
                 )
-                logger.info("telegram.started_webhook", url=self.config.webhook_url)
+                logger.info("telegram.started_webhook url=%s", self.config.webhook_url)
             except RuntimeError as e:
                 if "webhooks" in str(e).lower():
-                    logger.warning("telegram.webhook_extra_missing", error=str(e), fallback="polling")
+                    logger.warning("telegram.webhook_extra_missing error=%s fallback=polling", str(e))
                     await self._app.updater.start_polling(drop_pending_updates=True)
                     logger.info("telegram.started_polling_fallback")
                 else:
