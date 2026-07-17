@@ -1,19 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/trades_screen.dart';
 import 'screens/signals_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/api_service.dart';
-import 'services/update_service.dart';
 import 'providers/connection_status.dart';
 import 'providers/app_preferences.dart';
-
-/// Global tab index provider so any screen can navigate between tabs.
-final currentTabProvider = StateProvider<int>((ref) => 0);
 
 class AlphaStackApp extends ConsumerWidget {
   const AlphaStackApp({super.key});
@@ -48,7 +43,7 @@ class AlphaStackApp extends ConsumerWidget {
       title: 'AlphaStack',
       debugShowCheckedModeBanner: false,
       theme: isDark ? _buildDarkTheme() : _buildLightTheme(),
-      home: const AppBootstrap(),
+      home: const _AppBootstrap(),
     );
   }
 
@@ -187,11 +182,11 @@ class AlphaStackApp extends ConsumerWidget {
 
 /// Bootstrap widget that checks endpoint + auth on first launch.
 /// Shows endpoint setup → auto-authenticates → main app.
-class AppBootstrap extends ConsumerStatefulWidget {
-  const AppBootstrap({super.key});
+class _AppBootstrap extends ConsumerStatefulWidget {
+  const _AppBootstrap();
 
   @override
-  ConsumerState<AppBootstrap> createState() => _AppBootstrapState();
+  ConsumerState<_AppBootstrap> createState() => _AppBootstrapState();
 }
 
 class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
@@ -205,103 +200,25 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap> {
 
   Future<void> _bootstrap() async {
     final api = ApiService();
-
-    // If backend is reachable, auto-connect without asking for keys
-    final healthy = await api.checkHealth();
-    if (healthy) {
-      await api.autoAuthenticate();
-      if (mounted) setState(() => _ready = true);
-      _checkForUpdates();
-      return;
-    }
-
-    // Backend not reachable — show setup if no keys stored
-    final hasKeys = await api.hasStoredKeys();
     final baseUrl = await api.baseUrl;
+
+    // If using the default localhost URL and no keys stored, show endpoint setup
+    final hasKeys = await api.hasStoredKeys();
     final isDefaultUrl = baseUrl == ApiService.defaultBaseUrl;
 
     if (!hasKeys && isDefaultUrl) {
+      // First launch — need endpoint setup
       if (mounted) setState(() => _ready = false);
       return;
     }
 
     // Endpoint is set — try to auto-authenticate
     await api.autoAuthenticate();
+
+    // Trigger connection status provider
+    ref.read(connectionStatusProvider.notifier).connect();
+
     if (mounted) setState(() => _ready = true);
-    _checkForUpdates();
-  }
-
-  Future<void> _checkForUpdates() async {
-    try {
-      final update = await UpdateService.checkForUpdate();
-      if (update != null && update.updateAvailable && mounted) {
-        _showUpdateDialog(update);
-      }
-    } catch (e) {
-      debugPrint('Update check failed: $e');
-    }
-  }
-
-  void _showUpdateDialog(UpdateInfo update) {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AlphaStackApp.surfaceDark,
-        title: Row(
-          children: [
-            const Icon(Icons.system_update_rounded, color: AlphaStackApp.accentBlue),
-            const SizedBox(width: 10),
-            const Text('Update Available'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'v${update.latestVersion}',
-              style: const TextStyle(
-                color: AlphaStackApp.accentGreen,
-                fontWeight: FontWeight.w700,
-                fontSize: 18,
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (update.releaseNotes.isNotEmpty) ...[
-              const Text(
-                'What\'s new:',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                update.releaseNotes.length > 200
-                    ? '${update.releaseNotes.substring(0, 200)}...'
-                    : update.releaseNotes,
-                style: const TextStyle(color: AlphaStackApp.textSecondary, fontSize: 13),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Later'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final uri = Uri.parse(update.downloadUrl);
-              if (await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
-            },
-            icon: const Icon(Icons.download_rounded, size: 18),
-            label: const Text('Download'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -455,7 +372,7 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'Backend URL',
-                hintText: 'http://localhost:8000/api/v1',
+                hintText: 'https://alphastack.fly.dev/api/v1',
                 prefixIcon: Icon(Icons.dns_rounded),
               ),
               enabled: !_isConnecting,
@@ -526,19 +443,9 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
               ),
             ),
             const SizedBox(height: 12),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _isConnecting ? null : _skipForDemo,
-                icon: const Icon(Icons.science_rounded, size: 18),
-                label: const Text('Continue with Demo Mode'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AlphaStackApp.accentOrange,
-                  side: const BorderSide(color: AlphaStackApp.accentOrange),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
+            TextButton(
+              onPressed: _isConnecting ? null : _skipForDemo,
+              child: const Text('Skip — use demo mode'),
             ),
           ],
         ),
@@ -547,14 +454,16 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
   }
 }
 
-class MainNavigation extends ConsumerStatefulWidget {
+class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
   @override
-  ConsumerState<MainNavigation> createState() => _MainNavigationState();
+  State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends ConsumerState<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation> {
+  int _currentIndex = 0;
+
   final List<Widget> _screens = const [
     DashboardScreen(),
     TradesScreen(),
@@ -565,15 +474,14 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
-    final currentIndex = ref.watch(currentTabProvider);
     return Scaffold(
       body: IndexedStack(
-        index: currentIndex,
+        index: _currentIndex,
         children: _screens,
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: currentIndex,
-        onTap: (index) => ref.read(currentTabProvider.notifier).state = index,
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_rounded),
