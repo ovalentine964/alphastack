@@ -182,22 +182,21 @@ class AlphaTelegramBot:
         await self._app.start()
 
         if self.config.webhook_url:
-            # Production: webhook mode — works with multiple machines
+            # Production: webhook mode — register URL with Telegram, handle via FastAPI
             webhook_path = "/webhook/telegram"
+            webhook_url = f"{self.config.webhook_url}{webhook_path}"
             try:
-                await self._app.updater.start_webhook(
-                    url_path=webhook_path,
-                    webhook_url=f"{self.config.webhook_url}{webhook_path}",
+                # Register webhook URL with Telegram (no local server — FastAPI handles it)
+                await self._app.bot.set_webhook(
+                    url=webhook_url,
                     drop_pending_updates=True,
+                    max_connections=40,
                 )
-                logger.info("telegram.started_webhook url=%s", self.config.webhook_url)
-            except RuntimeError as e:
-                if "webhooks" in str(e).lower():
-                    logger.warning("telegram.webhook_extra_missing error=%s fallback=polling", str(e))
-                    await self._app.updater.start_polling(drop_pending_updates=True)
-                    logger.info("telegram.started_polling_fallback")
-                else:
-                    raise
+                logger.info("telegram.webhook_registered url=%s", webhook_url)
+            except Exception as e:
+                logger.warning("telegram.webhook_register_failed error=%s fallback=polling", str(e))
+                await self._app.updater.start_polling(drop_pending_updates=True)
+                logger.info("telegram.started_polling_fallback")
         else:
             # Development: polling mode — single machine only
             await self._app.updater.start_polling(drop_pending_updates=True)
@@ -209,7 +208,7 @@ class AlphaTelegramBot:
     def get_webhook_app(self):
         """Return the ASGI webhook app for integration with FastAPI."""
         if self._app and self.config.webhook_url:
-            return self._app.updater.webhook_app()
+            return self._app.updater.webhook_app(update_queue=self._app.update_queue)
         return None
 
     async def stop(self) -> None:
