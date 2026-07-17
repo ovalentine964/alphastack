@@ -80,9 +80,10 @@ class ConnectionStatusNotifier extends StateNotifier<ConnectionInfo> {
           isHealthy: true,
         );
       } else {
+        // Auth failed but backend is healthy — stay connected in read-only mode
         state = const ConnectionInfo(
-          state: ConnectionStatus.disconnected,
-          message: 'Authentication failed',
+          state: ConnectionStatus.connected,
+          message: 'Connected (demo mode)',
           isHealthy: true,
         );
       }

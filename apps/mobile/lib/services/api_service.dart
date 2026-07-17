@@ -503,21 +503,53 @@ class ApiService {
   }
 
   /// Auto-authenticate using stored keys, or demo credentials if none stored.
+  /// Tries: (1) stored keys → regular login, (2) demo endpoint → read-only token.
   /// Returns true if authentication succeeded.
   Future<bool> autoAuthenticate() async {
     try {
       final apiKey = await getBinanceApiKey();
       final apiSecret = await getBinanceApiSecret();
 
-      await authenticate(
-        apiKey: apiKey ?? 'demo',
-        apiSecret: apiSecret ?? 'demo',
-      );
-      return true;
+      // If we have stored keys, try regular login first
+      if (apiKey != null && apiKey.isNotEmpty &&
+          apiSecret != null && apiSecret.isNotEmpty) {
+        try {
+          await authenticate(apiKey: apiKey, apiSecret: apiSecret);
+          return true;
+        } catch (_) {
+          // Regular login failed — fall through to demo
+        }
+      }
+
+      // Try demo endpoint (works without admin credentials)
+      return await _demoAuthenticate();
     } catch (e) {
       debugPrint('Auto-authenticate failed: $e');
       return false;
     }
+  }
+
+  /// Authenticate via the demo endpoint (no credentials required).
+  Future<bool> _demoAuthenticate() async {
+    try {
+      final base = await baseUrl;
+      final uri = Uri.parse('$base/auth/demo');
+      final response = await http
+          .post(uri, headers: {'Content-Type': 'application/json'})
+          .timeout(_requestTimeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final accessToken = data['access_token'] as String?;
+        final refreshToken = data['refresh_token'] as String?;
+        if (accessToken != null) await setAuthToken(accessToken);
+        if (refreshToken != null) await setRefreshToken(refreshToken);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Demo authenticate failed: $e');
+    }
+    return false;
   }
 
   // ─── Health ──────────────────────────────────────────────────────

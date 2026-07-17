@@ -812,7 +812,7 @@ app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS, allow_credential
 # ─── Middleware ─────────────────────────────────────────────
 
 _PUBLIC_PATHS = {"/health", "/docs", "/redoc", "/openapi.json", "/metrics"}
-_PUBLIC_PREFIXES = ("/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh")
+_PUBLIC_PREFIXES = ("/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh", "/api/v1/auth/demo")
 
 
 @app.middleware("http")
@@ -880,6 +880,21 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+@app.post("/api/v1/auth/demo")
+async def demo_login():
+    """Demo login — issues a read-only token without admin credentials.
+    Used by the mobile app's 'Skip — use demo mode' button."""
+    access = _create_token("demo-user", 86400, "access")
+    refresh = _create_token("demo-user", 86400 * 7, "refresh")
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
+        "expires_in": 86400,
+        "user": {"id": "demo-001", "username": "demo", "plan": "demo"},
+    }
 
 
 @app.post("/api/v1/auth/login")

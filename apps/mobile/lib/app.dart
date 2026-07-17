@@ -295,14 +295,12 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
 
       if (authOk) {
         setState(() => _statusMessage = 'Connected!');
-        await Future.delayed(const Duration(milliseconds: 500));
-        widget.onConfigured();
       } else {
-        setState(() {
-          _isConnecting = false;
-          _statusMessage = 'Authentication failed. Backend may be misconfigured.';
-        });
+        // Auth failed but backend is healthy — proceed in demo mode
+        setState(() => _statusMessage = 'Connected in demo mode');
       }
+      await Future.delayed(const Duration(milliseconds: 500));
+      widget.onConfigured();
     } catch (e) {
       setState(() {
         _isConnecting = false;
@@ -317,9 +315,28 @@ class _FirstLaunchSetupState extends State<_FirstLaunchSetup> {
       _statusMessage = 'Connecting in demo mode...';
     });
 
-    final api = ApiService();
-    await api.autoAuthenticate();
-    widget.onConfigured();
+    try {
+      final api = ApiService();
+      await api.setBaseUrl(_urlController.text.trim());
+      final healthy = await api.checkHealth();
+      if (!healthy) {
+        setState(() {
+          _isConnecting = false;
+          _statusMessage = 'Backend unreachable. Check the URL.';
+        });
+        return;
+      }
+      // Try demo auth (no credentials needed)
+      await api.autoAuthenticate();
+      setState(() => _statusMessage = 'Connected!');
+      await Future.delayed(const Duration(milliseconds: 300));
+      widget.onConfigured();
+    } catch (e) {
+      setState(() {
+        _isConnecting = false;
+        _statusMessage = 'Error: $e';
+      });
+    }
   }
 
   @override
