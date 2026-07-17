@@ -35,14 +35,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-# ─── Monkey-patch known bugs in src/ ──────────────────────
-try:
-    import alphastack.strategy.steps.s10_confluence as _s10
-    if not hasattr(_s10, '_WEIGHTS'):
-        _s10._WEIGHTS = _s10._DEFAULT_WEIGHTS
-except Exception as _mp_err:
-    logging.getLogger("alphastack.live").warning("Monkey-patch for s10_confluence failed: %s", _mp_err)
-
 # ─── Production imports ───────────────────────────────────
 from alphastack.strategy.context import AlphaStackContext, Direction
 from alphastack.strategy.pipeline import AlphaStackPipeline
@@ -195,7 +187,8 @@ _telegram_bot: AlphaTelegramBot | None = None
 _ACTIVE_TOKENS: dict[str, dict] = {}
 
 # Token blocklist for logout / refresh-token rotation
-_TOKEN_BLOCKLIST: set[str] = set()
+from collections import OrderedDict
+_TOKEN_BLOCKLIST: OrderedDict[str, None] = OrderedDict()
 _TOKEN_BLOCKLIST_MAX: int = 10000
 
 
@@ -765,6 +758,8 @@ async def lifespan(app: FastAPI):
 
     # Start Telegram bot if configured
     try:
+        # Initialize exchange before passing to bot
+        _get_exchange()
         tg_config = TelegramConfig()
         if tg_config.is_configured:
             _telegram_bot = AlphaTelegramBot(
@@ -919,8 +914,8 @@ async def refresh(body: RefreshRequest):
     old_jti = payload.get("jti", "")
     if old_jti:
         if len(_TOKEN_BLOCKLIST) >= _TOKEN_BLOCKLIST_MAX:
-            _TOKEN_BLOCKLIST.pop()
-        _TOKEN_BLOCKLIST.add(old_jti)
+            _TOKEN_BLOCKLIST.popitem(last=False)
+        _TOKEN_BLOCKLIST[old_jti] = None
     access = _create_token(payload["sub"], 1800, "access")
     new_refresh = _create_token(payload["sub"], 86400 * 7, "refresh")
     return {"access_token": access, "refresh_token": new_refresh, "token_type": "bearer", "expires_in": 1800}
@@ -936,8 +931,8 @@ async def logout(request: Request):
             jti = claims.get("jti", "")
             if jti:
                 if len(_TOKEN_BLOCKLIST) >= _TOKEN_BLOCKLIST_MAX:
-                    _TOKEN_BLOCKLIST.pop()
-                _TOKEN_BLOCKLIST.add(jti)
+                    _TOKEN_BLOCKLIST.popitem(last=False)
+                _TOKEN_BLOCKLIST[jti] = None
         except Exception:
             pass  # Token already invalid — nothing to revoke
     return {"message": "Logged out"}

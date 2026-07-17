@@ -19,6 +19,8 @@ from alphastack.strategy.config import strategy_params
 
 # Default weights — overridden by config at runtime
 _DEFAULT_WEIGHTS: dict[str, float] = {
+
+
     "fundamental": 0.05,
     "market_bias": 0.15,
     "session": 0.05,
@@ -140,16 +142,16 @@ class ConfluenceEngine(AlphaStackStep):
         long_weight = 0.0
         short_weight = 0.0
         for component, vote in votes.items():
-            w = _WEIGHTS.get(component, 0.0)
+            w = weights.get(component, 0.0)
             if vote == Direction.LONG:
                 long_weight += w
             elif vote == Direction.SHORT:
                 short_weight += w
         # Add RSI divergence as a bonus (half-weight)
         if rsi_div_vote == Direction.LONG:
-            long_weight += _WEIGHTS["rsi"] * 0.5
+            long_weight += weights["rsi"] * 0.5
         elif rsi_div_vote == Direction.SHORT:
-            short_weight += _WEIGHTS["rsi"] * 0.5
+            short_weight += weights["rsi"] * 0.5
 
         # Consensus direction: whichever side has more weighted support
         if long_weight > short_weight:
