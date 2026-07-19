@@ -69,6 +69,12 @@ class CircuitBreakerState(BaseModel):
 class CircuitBreaker:
     """Multi-trigger circuit breaker that halts trading when risk limits are hit.
 
+    Progressive response for $7 micro-accounts:
+    - 3 consecutive losses → reduce position size 50%
+    - 5 consecutive losses → pause trading 1 hour
+    - Daily loss limit hit → stop trading for the day
+    - Emergency kill switch → immediate halt
+
     Each breaker type is independent — any single trip halts everything.
     Breakers can only be manually reset after a cooldown period.
 
@@ -95,12 +101,12 @@ class CircuitBreaker:
 
     def __init__(
         self,
-        max_daily_loss_pct: float = 3.0,
+        max_daily_loss_pct: float = 5.0,
         max_consecutive_losses: int = 5,
         volatility_zscore_threshold: float = 3.0,
         black_swan_zscore_threshold: float = 5.0,
-        cooldown_minutes: int = 30,
-        account_balance: float = 1000.0,
+        cooldown_minutes: int = 60,
+        account_balance: float = 7.0,
         asset_type: str = "crypto",
         max_spread_multiplier: float = 3.0,
     ) -> None:
@@ -189,6 +195,10 @@ class CircuitBreaker:
 
     def record_loss(self, pnl: float) -> None:
         """Record a trade result and check all breakers.
+
+        Progressive response:
+        - Tracks consecutive losses for governor to act on
+        - Trips breaker at max_consecutive_losses
 
         Args:
             pnl: Trade profit/loss (negative = loss).
@@ -420,6 +430,42 @@ class CircuitBreaker:
         self._trip_type = None
         self._tripped_at = None
         log.warning("circuit_breaker_force_reset")
+
+    def emergency_kill(self, reason: str = "Emergency kill switch activated") -> None:
+        """Emergency kill switch — immediate halt, no cooldown required.
+
+        Use when:
+        - Market anomaly detected
+        - Broker connection unstable
+        - Manual intervention needed
+        - Any "something is very wrong" scenario
+        """
+        self._trip(BreakerType.MANUAL, f"EMERGENCY: {reason}")
+        log.critical("emergency_kill_switch_activated", reason=reason)
+
+    @property
+    def should_reduce_size(self) -> bool:
+        """Check if position sizes should be reduced (progressive response).
+
+        Returns True when consecutive losses >= 3 but < pause threshold.
+        Governor uses this to apply 50% size reduction.
+        """
+        return 3 <= self._consecutive_losses < self._max_consecutive_losses
+
+    @property
+    def size_reduction_factor(self) -> float:
+        """Return the size reduction factor based on consecutive losses.
+
+        3 losses: 50% (0.5)
+        4 losses: 25% (0.25)
+        5+ losses: 0% (tripped)
+        """
+        if self._consecutive_losses < 3:
+            return 1.0
+        if self._consecutive_losses >= self._max_consecutive_losses:
+            return 0.0
+        # Each additional loss halves the size
+        return 0.5 ** (self._consecutive_losses - 2)
 
     # -- Daily reset --------------------------------------------------------
 

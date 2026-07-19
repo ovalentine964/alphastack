@@ -78,6 +78,35 @@ class MT5Settings(BaseSettings):
     timeout: int = 60_000  # ms
 
 
+class FXPesaSettings(BaseSettings):
+    """FXPesa (Kenya) broker credentials."""
+
+    model_config = SettingsConfigDict(env_prefix="FXPESA_")
+
+    login: int = 0
+    password: SecretStr = SecretStr("")
+    server: str = ""  # Auto-detected if empty
+    account_type: str = "cent"  # cent, standard, premium
+    use_demo: bool = True
+    # M-Pesa integration
+    mpesa_consumer_key: str = ""
+    mpesa_consumer_secret: str = ""
+    mpesa_passkey: str = ""
+    mpesa_shortcode: str = ""
+    mpesa_callback_url: str = ""
+    mpesa_environment: str = "sandbox"  # sandbox or production
+
+
+class MEXCSettings(BaseSettings):
+    """MEXC exchange credentials (CCXT-based)."""
+
+    model_config = SettingsConfigDict(env_prefix="MEXC_")
+
+    api_key: SecretStr = SecretStr("")
+    secret: SecretStr = SecretStr("")
+    market_type: str = "spot"  # spot or swap
+
+
 class OandaSettings(BaseSettings):
     """OANDA v20 API credentials."""
 
@@ -123,18 +152,31 @@ class DataFeedSettings(BaseSettings):
 
 
 class RiskSettings(BaseSettings):
-    """Risk management parameters."""
+    """Risk management parameters — calibrated for $7 micro-accounts.
+
+    Every cent matters. These are hard limits, not suggestions.
+    """
 
     model_config = SettingsConfigDict(env_prefix="RISK_")
 
-    max_drawdown_pct: float = Field(default=15.0, ge=0, le=100)
+    # -- Core limits (calibrated for $7 micro-account) ---------------------
+    max_risk_per_trade_pct: float = Field(default=2.0, ge=0, le=100)  # 2% = $0.14 on $7
+    max_daily_loss_pct: float = Field(default=5.0, ge=0, le=100)      # 5% = $0.35 on $7
+    max_drawdown_pct: float = Field(default=15.0, ge=0, le=100)       # 15% = $1.05 on $7
     max_position_size_pct: float = Field(default=5.0, ge=0, le=100)
-    max_daily_loss_pct: float = Field(default=3.0, ge=0, le=100)
-    max_open_positions: int = Field(default=10, ge=1)
+    max_open_positions: int = Field(default=3, ge=1)                   # max 3 concurrent trades
     max_correlation: float = Field(default=0.7, ge=0, le=1)
-    max_leverage: float = Field(default=2.0, ge=1)
+    max_leverage_forex: float = Field(default=100.0, ge=1)            # 1:100 for forex
+    max_leverage_crypto: float = Field(default=5.0, ge=1)             # 1:5 for crypto
+    max_leverage: float = Field(default=100.0, ge=1)                   # legacy compat
     stop_loss_atr_multiplier: float = Field(default=2.0, ge=0.1)
     risk_free_rate: float = Field(default=0.05, ge=0)
+
+    # -- Circuit breaker (micro-account tuned) -----------------------------
+    consecutive_loss_reduce_threshold: int = Field(default=3, ge=1)    # 3 losses → 50% size
+    consecutive_loss_pause_threshold: int = Field(default=5, ge=2)     # 5 losses → 1h pause
+    pause_duration_minutes: int = Field(default=60, ge=1)              # 1 hour pause
+    size_reduction_factor: float = Field(default=0.5, ge=0.01, le=1.0) # 50% reduction
 
 
 class APISettings(BaseSettings):
@@ -166,6 +208,8 @@ class Settings(BaseSettings):
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     mt5: MT5Settings = Field(default_factory=MT5Settings)
+    fxpesa: FXPesaSettings = Field(default_factory=FXPesaSettings)
+    mexc: MEXCSettings = Field(default_factory=MEXCSettings)
     oanda: OandaSettings = Field(default_factory=OandaSettings)
     ccxt: CCXTSettings = Field(default_factory=CCXTSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)

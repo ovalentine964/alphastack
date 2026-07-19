@@ -344,6 +344,7 @@ def create_app() -> FastAPI:
 
     # -- Register routes -----------------------------------------------------
     from alphastack.api.rest.routes.auth import router as auth_router
+    from alphastack.api.rest.routes.brokers import router as brokers_router
     from alphastack.api.rest.routes.portfolio import router as portfolio_router
     from alphastack.api.rest.routes.signals import router as signals_router
     from alphastack.api.rest.routes.system import router as system_router
@@ -354,6 +355,7 @@ def create_app() -> FastAPI:
     app.include_router(trades_router, prefix=prefix, tags=["trades"])
     app.include_router(portfolio_router, prefix=prefix, tags=["portfolio"])
     app.include_router(signals_router, prefix=prefix, tags=["signals"])
+    app.include_router(brokers_router, prefix=prefix, tags=["brokers"])
     app.include_router(system_router, tags=["system"])
 
     return app

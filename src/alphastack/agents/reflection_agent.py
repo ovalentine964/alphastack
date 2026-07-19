@@ -1,8 +1,11 @@
 """Reflection Agent — real implementation with trade journal and performance analysis.
 
 Production features:
-- Structured trade journal generation
+- Structured trade journal generation with entry/exit reasoning
 - Performance analysis with key metrics (win rate, profit factor, Sharpe, Sortino)
+- **Strategy performance tracking by market regime** (learning #1)
+- **Signal combination win-rate tracking** (learning #2)
+- **Adaptive confidence thresholds** based on recent performance (learning #3)
 - Strategy improvement suggestions based on pattern analysis
 - Trace mining integration for systematic improvement
 - Kelly stat updates pushed back to the Risk Agent
@@ -12,7 +15,9 @@ from __future__ import annotations
 
 import math
 import statistics
+import time
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -65,6 +70,8 @@ class TradeJournalEntry:
         self.timestamp = datetime.now(timezone.utc).isoformat()
         self.tags: list[str] = []
         self.lessons: list[str] = []
+        # Signal combination keys that produced this trade
+        self.signal_combo: tuple[str, ...] = ()
 
     def add_tag(self, tag: str) -> None:
         self.tags.append(tag)
@@ -93,6 +100,7 @@ class TradeJournalEntry:
             "tags": self.tags,
             "lessons": self.lessons,
             "metadata": self.metadata,
+            "signal_combo": list(self.signal_combo),
         }
 
 
@@ -218,6 +226,326 @@ class PerformanceAnalyzer:
 
 
 # ---------------------------------------------------------------------------
+# Regime Performance Tracker (Learning #1)
+# ---------------------------------------------------------------------------
+
+class RegimePerformanceTracker:
+    """Tracks strategy performance broken down by market regime.
+
+    Maintains rolling statistics per regime so the system can learn:
+    - Which regimes are profitable vs which are not
+    - Which strategies work best in each regime
+    - How to adjust sizing and thresholds per regime
+    """
+
+    def __init__(self, window_size: int = 50) -> None:
+        self._window_size = window_size
+        # regime -> list of (pnl, strategy, timestamp, signal_strength)
+        self._regime_trades: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # regime -> strategy -> list of pnl
+        self._regime_strategy_pnl: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+
+    def record(
+        self,
+        regime: str,
+        pnl: float,
+        strategy: str = "",
+        signal_strength: float = 0.0,
+    ) -> None:
+        """Record a trade outcome for a regime."""
+        entry = {
+            "pnl": pnl,
+            "strategy": strategy,
+            "signal_strength": signal_strength,
+            "timestamp": time.time(),
+        }
+        self._regime_trades[regime].append(entry)
+        # Keep window bounded
+        if len(self._regime_trades[regime]) > self._window_size * 2:
+            self._regime_trades[regime] = self._regime_trades[regime][-self._window_size:]
+        self._regime_strategy_pnl[regime][strategy].append(pnl)
+
+    def get_regime_stats(self, regime: str) -> dict[str, Any]:
+        """Get performance stats for a specific regime."""
+        trades = self._regime_trades.get(regime, [])
+        if not trades:
+            return {"regime": regime, "trade_count": 0}
+
+        pnls = [t["pnl"] for t in trades]
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
+
+        return {
+            "regime": regime,
+            "trade_count": len(pnls),
+            "win_rate": round(len(wins) / len(pnls), 4) if pnls else 0,
+            "total_pnl": round(sum(pnls), 6),
+            "avg_pnl": round(statistics.mean(pnls), 6) if pnls else 0,
+            "avg_win": round(statistics.mean(wins), 6) if wins else 0,
+            "avg_loss": round(statistics.mean(losses), 6) if losses else 0,
+            "profit_factor": round(
+                sum(wins) / abs(sum(losses)), 4
+            ) if losses and sum(losses) != 0 else (float("inf") if wins else 0),
+        }
+
+    def get_all_regime_stats(self) -> dict[str, dict[str, Any]]:
+        """Get performance stats for all tracked regimes."""
+        return {regime: self.get_regime_stats(regime) for regime in self._regime_trades}
+
+    def get_best_regime(self) -> str | None:
+        """Return the regime with highest expectancy, or None."""
+        best_regime = None
+        best_expectancy = float("-inf")
+        for regime in self._regime_trades:
+            stats = self.get_regime_stats(regime)
+            if stats["trade_count"] < 3:
+                continue
+            if stats["avg_pnl"] > best_expectancy:
+                best_expectancy = stats["avg_pnl"]
+                best_regime = regime
+        return best_regime
+
+    def get_worst_regime(self) -> str | None:
+        """Return the regime with lowest expectancy, or None."""
+        worst_regime = None
+        worst_expectancy = float("inf")
+        for regime in self._regime_trades:
+            stats = self.get_regime_stats(regime)
+            if stats["trade_count"] < 3:
+                continue
+            if stats["avg_pnl"] < worst_expectancy:
+                worst_expectancy = stats["avg_pnl"]
+                worst_regime = regime
+        return worst_regime
+
+    def get_regime_strategy_matrix(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Return regime × strategy performance matrix.
+
+        Returns: {regime: {strategy: {win_rate, total_pnl, trade_count}}}
+        """
+        matrix: dict[str, dict[str, dict[str, Any]]] = {}
+        for regime, strat_map in self._regime_strategy_pnl.items():
+            matrix[regime] = {}
+            for strategy, pnls in strat_map.items():
+                if not pnls:
+                    continue
+                wins = [p for p in pnls if p > 0]
+                matrix[regime][strategy] = {
+                    "trade_count": len(pnls),
+                    "win_rate": round(len(wins) / len(pnls), 4),
+                    "total_pnl": round(sum(pnls), 6),
+                    "avg_pnl": round(statistics.mean(pnls), 6),
+                }
+        return matrix
+
+
+# ---------------------------------------------------------------------------
+# Signal Combination Tracker (Learning #2)
+# ---------------------------------------------------------------------------
+
+class SignalCombinationTracker:
+    """Tracks which signal combinations produce the highest win rates.
+
+    Signal combinations are represented as sorted tuples of signal names.
+    Example: ("MACD_bullish", "RSI_oversold", "volume_spike")
+
+    This lets the system learn that "RSI + MACD + volume" works 65% of
+    the time while "RSI alone" only works 42%.
+    """
+
+    def __init__(self, min_samples: int = 5) -> None:
+        self._min_samples = min_samples
+        # combo_key -> list of (pnl, timestamp)
+        self._combo_outcomes: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # Individual signal -> list of pnl
+        self._individual_outcomes: dict[str, list[float]] = defaultdict(list)
+
+    def record(self, signal_combo: tuple[str, ...], pnl: float) -> None:
+        """Record a trade outcome for a signal combination."""
+        key = self._combo_key(signal_combo)
+        self._combo_outcomes[key].append({"pnl": pnl, "timestamp": time.time()})
+        # Also track individual signals
+        for sig in signal_combo:
+            self._individual_outcomes[sig].append(pnl)
+
+    def get_combo_stats(self, signal_combo: tuple[str, ...]) -> dict[str, Any]:
+        """Get stats for a specific signal combination."""
+        key = self._combo_key(signal_combo)
+        outcomes = self._combo_outcomes.get(key, [])
+        if not outcomes:
+            return {"combo": list(signal_combo), "trade_count": 0}
+
+        pnls = [o["pnl"] for o in outcomes]
+        wins = [p for p in pnls if p > 0]
+
+        return {
+            "combo": list(signal_combo),
+            "trade_count": len(pnls),
+            "win_rate": round(len(wins) / len(pnls), 4) if pnls else 0,
+            "total_pnl": round(sum(pnls), 6),
+            "avg_pnl": round(statistics.mean(pnls), 6) if pnls else 0,
+            "expectancy": round(statistics.mean(pnls), 6) if pnls else 0,
+        }
+
+    def get_top_combos(self, top_k: int = 10) -> list[dict[str, Any]]:
+        """Return top-K signal combinations by win rate (with min samples)."""
+        combos = []
+        for key, outcomes in self._combo_outcomes.items():
+            if len(outcomes) < self._min_samples:
+                continue
+            pnls = [o["pnl"] for o in outcomes]
+            wins = [p for p in pnls if p > 0]
+            combo = key.split("|")
+            combos.append({
+                "combo": combo,
+                "trade_count": len(pnls),
+                "win_rate": round(len(wins) / len(pnls), 4),
+                "total_pnl": round(sum(pnls), 6),
+                "avg_pnl": round(statistics.mean(pnls), 6),
+                "expectancy": round(statistics.mean(pnls), 6),
+            })
+        combos.sort(key=lambda c: c["win_rate"], reverse=True)
+        return combos[:top_k]
+
+    def get_worst_combos(self, top_k: int = 5) -> list[dict[str, Any]]:
+        """Return worst signal combinations by win rate."""
+        combos = []
+        for key, outcomes in self._combo_outcomes.items():
+            if len(outcomes) < self._min_samples:
+                continue
+            pnls = [o["pnl"] for o in outcomes]
+            wins = [p for p in pnls if p > 0]
+            combo = key.split("|")
+            combos.append({
+                "combo": combo,
+                "trade_count": len(pnls),
+                "win_rate": round(len(wins) / len(pnls), 4),
+                "total_pnl": round(sum(pnls), 6),
+            })
+        combos.sort(key=lambda c: c["win_rate"])
+        return combos[:top_k]
+
+    def get_individual_signal_stats(self) -> dict[str, dict[str, Any]]:
+        """Get win rate for each individual signal type."""
+        stats = {}
+        for signal, pnls in self._individual_outcomes.items():
+            if len(pnls) < 3:
+                continue
+            wins = [p for p in pnls if p > 0]
+            stats[signal] = {
+                "trade_count": len(pnls),
+                "win_rate": round(len(wins) / len(pnls), 4),
+                "total_pnl": round(sum(pnls), 6),
+                "avg_pnl": round(statistics.mean(pnls), 6),
+            }
+        return stats
+
+    @staticmethod
+    def _combo_key(signals: tuple[str, ...]) -> str:
+        """Create a deterministic key from signal names."""
+        return "|".join(sorted(signals))
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Confidence Thresholds (Learning #3)
+# ---------------------------------------------------------------------------
+
+class AdaptiveThresholds:
+    """Dynamically adjusts confidence thresholds based on recent performance.
+
+    When the system is winning → slightly relax thresholds (take more trades).
+    When the system is losing  → tighten thresholds (be more selective).
+
+    Uses exponential moving average of recent win rate to smoothly adapt.
+    """
+
+    def __init__(
+        self,
+        base_confidence: float = 0.45,
+        base_confluence: float = 0.30,
+        adaptation_rate: float = 0.05,
+        lookback: int = 20,
+    ) -> None:
+        self._base_confidence = base_confidence
+        self._base_confluence = base_confluence
+        self._adaptation_rate = adaptation_rate
+        self._lookback = lookback
+        self._recent_outcomes: list[float] = []  # 1.0 for win, 0.0 for loss
+        self._current_confidence = base_confidence
+        self._current_confluence = base_confluence
+        self._adjustment_history: list[dict[str, Any]] = []
+
+    def record_outcome(self, pnl: float) -> None:
+        """Record a trade outcome for threshold adaptation."""
+        outcome = 1.0 if pnl > 0 else 0.0
+        self._recent_outcomes.append(outcome)
+        if len(self._recent_outcomes) > self._lookback * 2:
+            self._recent_outcomes = self._recent_outcomes[-self._lookback:]
+
+        # Recompute thresholds
+        self._adapt()
+
+    def _adapt(self) -> None:
+        """Adjust thresholds based on recent win rate."""
+        if len(self._recent_outcomes) < self._lookback:
+            return
+
+        recent = self._recent_outcomes[-self._lookback:]
+        recent_wr = sum(recent) / len(recent)
+
+        # Target win rate is 0.55 — if above, relax; if below, tighten
+        deviation = recent_wr - 0.55
+
+        # Adjust confidence threshold: lower = take more trades, higher = more selective
+        old_conf = self._current_confidence
+        self._current_confidence = self._base_confidence - (deviation * self._adaptation_rate * 10)
+        # Clamp to [0.2, 0.8]
+        self._current_confidence = max(0.2, min(0.8, self._current_confidence))
+
+        old_confluence = self._current_confluence
+        self._current_confluence = self._base_confluence - (deviation * self._adaptation_rate * 8)
+        # Clamp to [0.1, 0.7]
+        self._current_confluence = max(0.1, min(0.7, self._current_confluence))
+
+        if abs(old_conf - self._current_confidence) > 0.001:
+            self._adjustment_history.append({
+                "timestamp": time.time(),
+                "recent_win_rate": round(recent_wr, 4),
+                "old_confidence": round(old_conf, 4),
+                "new_confidence": round(self._current_confidence, 4),
+                "old_confluence": round(old_confluence, 4),
+                "new_confluence": round(self._current_confluence, 4),
+                "deviation": round(deviation, 4),
+            })
+
+    @property
+    def confidence_threshold(self) -> float:
+        return round(self._current_confidence, 4)
+
+    @property
+    def confluence_threshold(self) -> float:
+        return round(self._current_confluence, 4)
+
+    def get_state(self) -> dict[str, Any]:
+        """Return current threshold state."""
+        recent_wr = 0.0
+        if self._recent_outcomes:
+            recent = self._recent_outcomes[-self._lookback:]
+            recent_wr = sum(recent) / len(recent) if recent else 0.0
+
+        return {
+            "confidence_threshold": self.confidence_threshold,
+            "confluence_threshold": self.confluence_threshold,
+            "base_confidence": self._base_confidence,
+            "base_confluence": self._base_confluence,
+            "recent_win_rate": round(recent_wr, 4),
+            "samples": len(self._recent_outcomes),
+            "adjustments_made": len(self._adjustment_history),
+            "last_adjustment": self._adjustment_history[-1] if self._adjustment_history else None,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Strategy Improvement Engine
 # ---------------------------------------------------------------------------
 
@@ -229,6 +557,8 @@ class StrategyImprover:
         journal_entries: list[dict[str, Any]],
         metrics: dict[str, Any],
         pipeline_context: dict[str, Any],
+        regime_stats: dict[str, dict[str, Any]] | None = None,
+        signal_combo_stats: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Generate improvement suggestions based on trade patterns.
 
@@ -292,32 +622,81 @@ class StrategyImprover:
                 "category": "risk",
             })
 
-        # 5. Regime-specific analysis
-        regime_trades: dict[str, list[dict[str, Any]]] = {}
-        for entry in journal_entries:
-            regime = entry.get("regime", "unknown")
-            regime_trades.setdefault(regime, []).append(entry)
+        # 5. Regime-specific analysis (enhanced with tracker data)
+        if regime_stats:
+            for regime, stats in regime_stats.items():
+                if stats.get("trade_count", 0) < 3:
+                    continue
+                regime_wr = stats.get("win_rate", 0)
+                regime_pf = stats.get("profit_factor", 0)
 
-        for regime, trades in regime_trades.items():
-            regime_pnls = [t.get("pnl", 0) for t in trades]
-            regime_wr = sum(1 for p in regime_pnls if p > 0) / len(regime_pnls) if regime_pnls else 0
-            regime_pf = (
-                sum(p for p in regime_pnls if p > 0) / abs(sum(p for p in regime_pnls if p < 0))
-                if any(p < 0 for p in regime_pnls) and sum(p for p in regime_pnls if p < 0) != 0
-                else float("inf") if any(p > 0 for p in regime_pnls) else 0
-            )
+                if regime_wr < 0.3:
+                    suggestions.append({
+                        "parameter": f"regime_{regime}_filter",
+                        "current": "active",
+                        "recommended": "reduced_size",
+                        "reason": (
+                            f"Win rate {regime_wr:.1%} in {regime} regime "
+                            f"({stats['trade_count']} trades, PF={regime_pf:.1f}) — reduce exposure"
+                        ),
+                        "priority": "medium",
+                        "category": "regime",
+                    })
+                elif regime_wr > 0.65 and stats.get("trade_count", 0) >= 10:
+                    suggestions.append({
+                        "parameter": f"regime_{regime}_boost",
+                        "current": "standard_size",
+                        "recommended": "increased_size",
+                        "reason": (
+                            f"Win rate {regime_wr:.1%} in {regime} regime "
+                            f"({stats['trade_count']} trades) — consider increasing exposure"
+                        ),
+                        "priority": "low",
+                        "category": "regime",
+                    })
+        else:
+            # Fallback: inline regime analysis
+            regime_trades: dict[str, list[dict[str, Any]]] = {}
+            for entry in journal_entries:
+                regime = entry.get("regime", "unknown")
+                regime_trades.setdefault(regime, []).append(entry)
 
-            if regime_wr < 0.3 and len(trades) >= 3:
-                suggestions.append({
-                    "parameter": f"regime_{regime}_filter",
-                    "current": "active",
-                    "recommended": "reduced_size",
-                    "reason": f"Win rate {regime_wr:.1%} in {regime} regime ({len(trades)} trades, PF={regime_pf:.1f}) — reduce exposure",
-                    "priority": "medium",
-                    "category": "regime",
-                })
+            for regime, trades in regime_trades.items():
+                regime_pnls = [t.get("pnl", 0) for t in trades]
+                regime_wr = sum(1 for p in regime_pnls if p > 0) / len(regime_pnls) if regime_pnls else 0
+                regime_pf = (
+                    sum(p for p in regime_pnls if p > 0) / abs(sum(p for p in regime_pnls if p < 0))
+                    if any(p < 0 for p in regime_pnls) and sum(p for p in regime_pnls if p < 0) != 0
+                    else float("inf") if any(p > 0 for p in regime_pnls) else 0
+                )
 
-        # 6. Symbol-specific analysis
+                if regime_wr < 0.3 and len(trades) >= 3:
+                    suggestions.append({
+                        "parameter": f"regime_{regime}_filter",
+                        "current": "active",
+                        "recommended": "reduced_size",
+                        "reason": f"Win rate {regime_wr:.1%} in {regime} regime ({len(trades)} trades, PF={regime_pf:.1f}) — reduce exposure",
+                        "priority": "medium",
+                        "category": "regime",
+                    })
+
+        # 6. Signal combination analysis
+        if signal_combo_stats:
+            for combo_stat in signal_combo_stats[:3]:  # top 3
+                if combo_stat.get("win_rate", 0) > 0.65 and combo_stat.get("trade_count", 0) >= 5:
+                    suggestions.append({
+                        "parameter": "signal_combo_boost",
+                        "current": "standard",
+                        "recommended": "prioritize",
+                        "reason": (
+                            f"Signal combo {combo_stat['combo']} has {combo_stat['win_rate']:.0%} win rate "
+                            f"({combo_stat['trade_count']} trades) — prioritize this combination"
+                        ),
+                        "priority": "medium",
+                        "category": "signals",
+                    })
+
+        # 7. Symbol-specific analysis
         symbol_trades: dict[str, list[dict[str, Any]]] = {}
         for entry in journal_entries:
             sym = entry.get("symbol", "")
@@ -337,7 +716,7 @@ class StrategyImprover:
                     "category": "universe",
                 })
 
-        # 7. Good performance → suggest scaling
+        # 8. Good performance → suggest scaling
         if win_rate > 0.6 and profit_factor > 2.0 and trade_count >= 10:
             suggestions.append({
                 "parameter": "kelly_fraction",
@@ -348,7 +727,7 @@ class StrategyImprover:
                 "category": "sizing",
             })
 
-        # 8. Expectancy per trade
+        # 9. Expectancy per trade
         if expectancy < 0:
             suggestions.append({
                 "parameter": "expectancy",
@@ -369,10 +748,13 @@ class StrategyImprover:
 class ReflectionAgent(AlphaStackAgent):
     """Post-trade analysis, performance review, and strategy adjustment.
 
-    Upgraded v2.0 features:
+    Upgraded v3.0 features (self-improving loop):
     - Structured trade journal generation
     - Performance analysis (Sharpe, Sortino, expectancy, consecutive losses)
-    - Strategy improvement suggestions (regime-aware, symbol-aware)
+    - **RegimePerformanceTracker** — tracks win rate per market regime
+    - **SignalCombinationTracker** — identifies highest win-rate signal combos
+    - **AdaptiveThresholds** — auto-tunes confidence/confluence thresholds
+    - Strategy improvement suggestions (regime-aware, signal-aware, symbol-aware)
     - Trace mining integration
     - Kelly stat updates for the Risk Agent
     """
@@ -381,7 +763,7 @@ class ReflectionAgent(AlphaStackAgent):
         super().__init__(
             name="reflection",
             role="analyst",
-            description="Post-trade analysis with journal, performance metrics, and improvement suggestions",
+            description="Post-trade analysis with journal, performance metrics, and adaptive learning",
             event_bus=event_bus,
             timeout=300.0,  # reflection can be thorough
             max_retries=1,
@@ -392,15 +774,27 @@ class ReflectionAgent(AlphaStackAgent):
         self._journal: list[TradeJournalEntry] = []
         self._max_journal = 1000
 
+        # --- Learning components ---
+        self._regime_tracker = RegimePerformanceTracker(window_size=50)
+        self._signal_tracker = SignalCombinationTracker(min_samples=5)
+        self._adaptive_thresholds = AdaptiveThresholds(
+            base_confidence=0.45,
+            base_confluence=0.30,
+            adaptation_rate=0.05,
+            lookback=20,
+        )
+
     def system_prompt(self) -> str:
         return (
             "You are the AlphaStack Reflection Agent. Your job is to:\n"
             "1. Generate structured trade journal entries for every execution\n"
             "2. Compute performance metrics: win rate, PF, Sharpe, Sortino, expectancy\n"
-            "3. Identify patterns in winning vs losing trades by regime and symbol\n"
-            "4. Generate concrete improvement suggestions with priority\n"
-            "5. Update Kelly statistics for the Risk Agent\n"
-            "6. Feed learnings back to improve the strategy pipeline\n"
+            "3. Track strategy performance by market regime\n"
+            "4. Identify which signal combinations have highest win rate\n"
+            "5. Adjust confidence thresholds based on recent performance\n"
+            "6. Generate concrete improvement suggestions with priority\n"
+            "7. Update Kelly statistics for the Risk Agent\n"
+            "8. Feed learnings back to improve the strategy pipeline\n"
         )
 
     async def execute(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -419,34 +813,63 @@ class ReflectionAgent(AlphaStackAgent):
         # 1. Generate trade journal entries
         journal_entries = self._generate_journal(execution_log, signals, pipeline_context)
 
-        # 2. Compute performance metrics
+        # 2. Feed outcomes into learning trackers
+        for entry in journal_entries:
+            # Regime tracker
+            self._regime_tracker.record(
+                regime=entry.regime,
+                pnl=entry.pnl,
+                strategy=entry.strategy,
+                signal_strength=entry.signal_strength,
+            )
+            # Signal combination tracker
+            if entry.signal_combo:
+                self._signal_tracker.record(entry.signal_combo, entry.pnl)
+            # Adaptive thresholds
+            self._adaptive_thresholds.record_outcome(entry.pnl)
+
+        # 3. Compute performance metrics
         pnls = [j.pnl for j in journal_entries]
         hold_times = [j.hold_time_minutes for j in journal_entries if j.hold_time_minutes > 0]
         metrics = self._analyzer.compute_metrics(pnls, hold_times or None)
 
-        # 3. Generate improvement suggestions
+        # 4. Get learning data
+        regime_stats = self._regime_tracker.get_all_regime_stats()
+        top_combos = self._signal_tracker.get_top_combos(top_k=10)
+        threshold_state = self._adaptive_thresholds.get_state()
+
+        # 5. Generate improvement suggestions (now with learning data)
         journal_dicts = [j.to_dict() for j in journal_entries]
         suggestions = self._improver.analyze_and_suggest(
             journal_dicts, metrics, pipeline_context,
+            regime_stats=regime_stats,
+            signal_combo_stats=top_combos,
         )
 
-        # 4. Compute Kelly stats for Risk Agent
+        # 6. Compute Kelly stats for Risk Agent
         kelly_update = self._compute_kelly_update(metrics)
 
-        # 5. Extract learnings
-        learnings = self._extract_learnings(metrics, journal_dicts)
+        # 7. Extract learnings
+        learnings = self._extract_learnings(metrics, journal_dicts, regime_stats, top_combos)
 
-        # 6. Store journal entries
+        # 8. Store journal entries
         self._journal.extend(journal_entries)
         if len(self._journal) > self._max_journal:
             self._journal = self._journal[-self._max_journal:]
 
-        # 7. Build performance summary
+        # 9. Build performance summary
         performance: dict[str, Any] = {
             **metrics,
             "learnings": learnings,
             "kelly_update": kelly_update,
             "reflection_timestamp": datetime.now(timezone.utc).isoformat(),
+            # --- Learning data ---
+            "regime_performance": regime_stats,
+            "top_signal_combos": top_combos[:5],
+            "worst_signal_combos": self._signal_tracker.get_worst_combos(3),
+            "individual_signal_stats": self._signal_tracker.get_individual_signal_stats(),
+            "adaptive_thresholds": threshold_state,
+            "regime_strategy_matrix": self._regime_tracker.get_regime_strategy_matrix(),
         }
 
         logger.info(
@@ -455,12 +878,18 @@ class ReflectionAgent(AlphaStackAgent):
             trade_count=metrics.get("trade_count", 0),
             win_rate=metrics.get("win_rate", 0),
             suggestions=len(suggestions),
+            regimes_tracked=len(regime_stats),
+            signal_combos_tracked=len(top_combos),
         )
 
         return {
             "performance_summary": performance,
             "strategy_adjustments": suggestions,
             "trade_journal": [j.to_dict() for j in journal_entries[-10:]],  # last 10
+            "adaptive_thresholds": {
+                "confidence": self._adaptive_thresholds.confidence_threshold,
+                "confluence": self._adaptive_thresholds.confluence_threshold,
+            },
             "_confidence": 0.85,
         }
 
@@ -535,6 +964,13 @@ class ReflectionAgent(AlphaStackAgent):
                 },
             )
 
+            # Build signal combination from metadata
+            active_signals = entry.get("active_signals", signal.get("active_signals", []))
+            if isinstance(active_signals, list) and active_signals:
+                journal_entry.signal_combo = tuple(sorted(str(s) for s in active_signals))
+            elif signal.get("strategy"):
+                journal_entry.signal_combo = (signal["strategy"],)
+
             # Auto-tag
             if pnl > 0:
                 journal_entry.add_tag("winner")
@@ -577,15 +1013,17 @@ class ReflectionAgent(AlphaStackAgent):
         }
 
     # ------------------------------------------------------------------
-    # Learnings extraction
+    # Learnings extraction (enhanced with learning data)
     # ------------------------------------------------------------------
 
     def _extract_learnings(
         self,
         metrics: dict[str, Any],
         journal: list[dict[str, Any]],
+        regime_stats: dict[str, dict[str, Any]] | None = None,
+        top_combos: list[dict[str, Any]] | None = None,
     ) -> list[str]:
-        """Extract human-readable learnings."""
+        """Extract human-readable learnings from all data sources."""
         learnings: list[str] = []
         trade_count = metrics.get("trade_count", 0)
 
@@ -637,13 +1075,72 @@ class ReflectionAgent(AlphaStackAgent):
             avg_slip = statistics.mean(j["slippage_bps"] for j in high_slippage)
             learnings.append(f"{len(high_slippage)} trades with high slippage (avg {avg_slip:.1f} bps)")
 
+        # --- Regime learnings ---
+        if regime_stats:
+            best = self._regime_tracker.get_best_regime()
+            worst = self._regime_tracker.get_worst_regime()
+            if best:
+                stats = regime_stats[best]
+                learnings.append(
+                    f"Best regime: {best} (WR={stats['win_rate']:.1%}, "
+                    f"{stats['trade_count']} trades, avg PnL={stats['avg_pnl']:.4f})"
+                )
+            if worst and worst != best:
+                stats = regime_stats[worst]
+                learnings.append(
+                    f"Worst regime: {worst} (WR={stats['win_rate']:.1%}, "
+                    f"{stats['trade_count']} trades, avg PnL={stats['avg_pnl']:.4f})"
+                )
+
+        # --- Signal combination learnings ---
+        if top_combos:
+            best_combo = top_combos[0]
+            if best_combo.get("win_rate", 0) > 0.6:
+                learnings.append(
+                    f"Top signal combo: {best_combo['combo']} — "
+                    f"{best_combo['win_rate']:.0%} WR over {best_combo['trade_count']} trades"
+                )
+
+        # --- Adaptive threshold status ---
+        threshold_state = self._adaptive_thresholds.get_state()
+        if threshold_state["adjustments_made"] > 0:
+            learnings.append(
+                f"Adaptive thresholds: confidence={threshold_state['confidence_threshold']:.3f}, "
+                f"confluence={threshold_state['confluence_threshold']:.3f} "
+                f"(adjusted {threshold_state['adjustments_made']} times)"
+            )
+
         return learnings
 
     # ------------------------------------------------------------------
-    # Public API for journal access
+    # Public API
     # ------------------------------------------------------------------
 
     def get_journal(self, n: int | None = None) -> list[dict[str, Any]]:
         """Return recent journal entries."""
         entries = self._journal[-n:] if n else self._journal
         return [e.to_dict() for e in entries]
+
+    def get_regime_performance(self) -> dict[str, dict[str, Any]]:
+        """Return performance stats by regime."""
+        return self._regime_tracker.get_all_regime_stats()
+
+    def get_top_signal_combos(self, top_k: int = 10) -> list[dict[str, Any]]:
+        """Return top signal combinations by win rate."""
+        return self._signal_tracker.get_top_combos(top_k)
+
+    def get_adaptive_thresholds(self) -> dict[str, Any]:
+        """Return current adaptive threshold state."""
+        return self._adaptive_thresholds.get_state()
+
+    def get_learning_summary(self) -> dict[str, Any]:
+        """Return a complete learning summary for monitoring."""
+        return {
+            "regime_performance": self._regime_tracker.get_all_regime_stats(),
+            "regime_strategy_matrix": self._regime_tracker.get_regime_strategy_matrix(),
+            "top_signal_combos": self._signal_tracker.get_top_combos(10),
+            "worst_signal_combos": self._signal_tracker.get_worst_combos(5),
+            "individual_signal_stats": self._signal_tracker.get_individual_signal_stats(),
+            "adaptive_thresholds": self._adaptive_thresholds.get_state(),
+            "journal_size": len(self._journal),
+        }

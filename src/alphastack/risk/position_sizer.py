@@ -88,22 +88,25 @@ class PositionSizer:
     can represent a significant portion of the risk budget.
     """
 
-    # Our hard leverage cap — tighter than broker's 50x
-    OUR_MAX_LEVERAGE: float = 20.0
+    # Leverage caps per asset class
+    # Forex: 1:100 (broker may offer more, but we cap lower)
+    # Crypto: 1:5 (volatile, dangerous at high leverage)
+    OUR_MAX_LEVERAGE_FOREX: float = 100.0
+    OUR_MAX_LEVERAGE_CRYPTO: float = 5.0
 
     def __init__(
         self,
-        account_balance: float = 1000.0,
+        account_balance: float = 7.0,
         max_position_pct: float = 5.0,
-        default_risk_pct: float = 1.0,
+        default_risk_pct: float = 2.0,
         max_risk_pct: float = 2.0,
-        max_leverage: float = 20.0,
+        max_leverage: float = 100.0,
     ) -> None:
         self._balance = account_balance
         self._max_position_pct = max_position_pct
         self._default_risk_pct = default_risk_pct
         self._max_risk_pct = max_risk_pct
-        self._max_leverage = min(max_leverage, self.OUR_MAX_LEVERAGE)
+        self._max_leverage = max_leverage  # trust config; 100x forex, 5x crypto
 
     def update_balance(self, new_balance: float) -> None:
         """Update account balance reference."""
@@ -229,9 +232,13 @@ class PositionSizer:
         # Size in lots
         lots = risk_amount / (sl_distance_pips * pip_value_per_lot)
 
-        # Align to lot step
-        if request.lot_step > 0:
+        # Align to lot step — but allow sub-minimum for micro-accounts
+        if request.lot_step > 0 and lots >= request.lot_step:
             lots = math.floor(lots / request.lot_step) * request.lot_step
+        elif lots > 0 and lots < request.min_size:
+            # For micro-accounts, allow the raw fractional lot
+            # (broker will handle sub-minimum fills or reject at execution)
+            pass
 
         # Spread cost adjustment for forex
         spread_cost_per_lot = request.spread_pips * pip_value_per_lot
@@ -360,10 +367,10 @@ class PositionSizer:
         balance: float,
         risk_pct: float,
     ) -> float:
-        """Kelly criterion sizing with half-Kelly safety factor.
+        """Kelly criterion sizing with quarter-Kelly safety for micro-accounts.
 
         Kelly % = W - (1-W)/R where W=win_rate, R=win/loss ratio.
-        We use half-Kelly to reduce variance.
+        We use quarter-Kelly (0.25) for $7 accounts — variance kills small accounts.
         """
         w = request.win_rate
         r = request.avg_win / max(request.avg_loss, 1e-10)
@@ -374,11 +381,11 @@ class PositionSizer:
             log.info("kelly_negative_edge", win_rate=w, ratio=r)
             return request.min_size
 
-        # Half-Kelly for safety
-        kelly_half = kelly_full * 0.5
+        # Quarter-Kelly for micro-accounts (reduces ruin probability)
+        kelly_quarter = kelly_full * 0.25
 
         # Cap at our max risk
-        kelly_pct = min(kelly_half * 100, risk_pct)
+        kelly_pct = min(kelly_quarter * 100, risk_pct)
         risk_amount = balance * (kelly_pct / 100)
 
         sl_distance = abs(request.entry_price - request.stop_loss)
@@ -426,16 +433,20 @@ class PositionSizer:
     def _de_escalate_risk(self, base_pct: float, daily_dd_pct: float) -> float:
         """Progressive de-escalation: reduce risk as drawdown increases.
 
-        Drawdown 0-2%:  full risk
-        Drawdown 2-5%:  50% risk
-        Drawdown 5-10%: 25% risk
-        Drawdown >10%:  10% risk
+        Tuned for $7 micro-accounts where every cent matters:
+        Drawdown 0-1%:  full risk (2% = $0.14)
+        Drawdown 1-2%:  75% risk (1.5% = $0.105)
+        Drawdown 2-3%:  50% risk (1% = $0.07)
+        Drawdown 3-5%:  25% risk (0.5% = $0.035)
+        Drawdown >5%:   10% risk (0.2% = $0.014)
         """
-        if daily_dd_pct <= 2.0:
+        if daily_dd_pct <= 1.0:
             return base_pct
-        elif daily_dd_pct <= 5.0:
+        elif daily_dd_pct <= 2.0:
+            return base_pct * 0.75
+        elif daily_dd_pct <= 3.0:
             return base_pct * 0.50
-        elif daily_dd_pct <= 10.0:
+        elif daily_dd_pct <= 5.0:
             return base_pct * 0.25
         else:
             return base_pct * 0.10

@@ -1,10 +1,13 @@
 """Step 10: Confluence Engine — true multi-factor consensus with independent
 direction signals from each component.
 
-FIX: Direction is no longer determined solely by structure.  Each component
-independently votes LONG, SHORT, or NEUTRAL.  The final direction is the
-consensus (majority vote weighted by component weights).  The confluence
-score measures *alignment strength* — how many factors agree.
+Real trading logic:
+- Each component independently votes LONG, SHORT, or NEUTRAL
+- Weighted majority voting determines final direction
+- Component agreement metric (how many factors agree)
+- Regime-adaptive weight allocation
+- Minimum consensus threshold (require N agreeing components)
+- Confidence-adjusted confluence score (alignment × certainty)
 """
 
 from __future__ import annotations
@@ -19,8 +22,6 @@ from alphastack.strategy.config import strategy_params
 
 # Default weights — overridden by config at runtime
 _DEFAULT_WEIGHTS: dict[str, float] = {
-
-
     "fundamental": 0.05,
     "market_bias": 0.15,
     "session": 0.05,
@@ -75,6 +76,7 @@ def _vote_from_smc(context: AlphaStackContext, price: float) -> Direction:
     """Derive direction from SMC (order blocks + FVGs) near current price."""
     long_score = 0.0
     short_score = 0.0
+
     for ob in context.smc.order_blocks:
         if ob.mitigated:
             continue
@@ -84,6 +86,7 @@ def _vote_from_smc(context: AlphaStackContext, price: float) -> Direction:
         # Bearish OB: price is in the OB zone → short signal
         elif ob.direction == Direction.SHORT and ob.low <= price <= ob.high:
             short_score = max(short_score, 0.7)
+
     for fvg in context.smc.fvgs:
         if fvg.filled:
             continue
@@ -91,9 +94,18 @@ def _vote_from_smc(context: AlphaStackContext, price: float) -> Direction:
             long_score = max(long_score, 0.5)
         elif fvg.direction == Direction.SHORT and fvg.low <= price <= fvg.high:
             short_score = max(short_score, 0.5)
-    if long_score > short_score:
+
+    # Order flow bias from extended SMC data
+    order_flow = context.market_data.get("smc_order_flow_bias", "none")
+    flow_confidence = context.market_data.get("smc_order_flow_confidence", 0.0)
+    if order_flow == "long":
+        long_score += flow_confidence * 0.3
+    elif order_flow == "short":
+        short_score += flow_confidence * 0.3
+
+    if long_score > short_score * 1.2:
         return Direction.LONG
-    if short_score > long_score:
+    if short_score > long_score * 1.2:
         return Direction.SHORT
     return Direction.NONE
 
@@ -102,12 +114,39 @@ def _vote_from_sr(context: AlphaStackContext, price: float) -> Direction:
     """Derive direction from S/R proximity — near support = long, near resistance = short."""
     if context.sr_levels.support:
         nearest_sup = min(context.sr_levels.support, key=lambda l: abs(l.price - price))
-        if abs(nearest_sup.price - price) / max(price, 1e-9) < 0.005:  # within 0.5%
+        dist_pct = abs(nearest_sup.price - price) / max(price, 1e-9)
+        if dist_pct < 0.005:  # within 0.5%
             return Direction.LONG
     if context.sr_levels.resistance:
         nearest_res = min(context.sr_levels.resistance, key=lambda l: abs(l.price - price))
-        if abs(nearest_res.price - price) / max(price, 1e-9) < 0.005:
+        dist_pct = abs(nearest_res.price - price) / max(price, 1e-9)
+        if dist_pct < 0.005:
             return Direction.SHORT
+    return Direction.NONE
+
+
+def _vote_from_structure_bos(context: AlphaStackContext) -> Direction:
+    """Derive direction from BOS/CHoCH signals (extended data from step 4)."""
+    bos_direction = context.market_data.get("bos_direction")
+    choch_detected = context.market_data.get("choch_detected", False)
+
+    if choch_detected:
+        # CHoCH is a reversal signal — use structure direction
+        return context.structure.direction
+
+    if bos_direction == "long":
+        return Direction.LONG
+    elif bos_direction == "short":
+        return Direction.SHORT
+
+    return context.structure.direction
+
+
+def _vote_from_session_quality(context: AlphaStackContext) -> Direction:
+    """Session quality doesn't suggest direction, but amplifies other signals.
+
+    Returns NONE (neutral direction) but the quality score is used for weighting.
+    """
     return Direction.NONE
 
 
@@ -128,8 +167,8 @@ class ConfluenceEngine(AlphaStackStep):
         votes: dict[str, Direction] = {}
         votes["fundamental"] = _vote_from_bias(context.fundamental.bias.value)
         votes["market_bias"] = _vote_from_bias(context.bias.bias.value)
-        votes["session"] = Direction.NONE  # session doesn't suggest direction
-        votes["structure"] = context.structure.direction
+        votes["session"] = _vote_from_session_quality(context)
+        votes["structure"] = _vote_from_structure_bos(context)
         votes["sr_levels"] = _vote_from_sr(context, price)
         votes["liquidity"] = Direction.NONE  # liquidity targets don't imply direction
         votes["smc"] = _vote_from_smc(context, price)
@@ -161,8 +200,7 @@ class ConfluenceEngine(AlphaStackStep):
         else:
             final_direction = Direction.NONE
 
-        # --- Phase 3: Score alignment strength (how well factors agree) ---
-        # Each factor contributes +weight if aligned with final direction, 0 otherwise
+        # --- Phase 3: Score alignment strength ---
         component_scores: dict[str, float] = {}
 
         # Fundamental
@@ -182,17 +220,19 @@ class ConfluenceEngine(AlphaStackStep):
             component_scores["market_bias"] = -0.5
 
         # Session (volatility contributes regardless of direction)
-        component_scores["session"] = context.session.volatility
+        session_quality = context.market_data.get("session_quality", context.session.volatility)
+        component_scores["session"] = session_quality
 
-        # Structure
+        # Structure (with trend strength weighting)
         if votes["structure"] == final_direction:
-            component_scores["structure"] = 1.0
+            trend_strength = context.market_data.get("trend_strength", 0.5)
+            component_scores["structure"] = 0.5 + trend_strength * 0.5
         elif votes["structure"] == Direction.NONE:
             component_scores["structure"] = 0.0
         else:
             component_scores["structure"] = -0.5
 
-        # S/R levels
+        # S/R levels (strength-weighted)
         if votes["sr_levels"] == final_direction:
             sr_list = context.sr_levels.support if final_direction == Direction.LONG else context.sr_levels.resistance
             if sr_list:
@@ -205,11 +245,11 @@ class ConfluenceEngine(AlphaStackStep):
         else:
             component_scores["sr_levels"] = -0.3
 
-        # Liquidity
+        # Liquidity (pool strength)
         liq_score = max((p.strength for p in context.liquidity_pools), default=0.0)
         component_scores["liquidity"] = liq_score
 
-        # SMC
+        # SMC (OB + FVG alignment)
         smc_score = 0.0
         for ob in context.smc.order_blocks:
             if ob.direction == final_direction and not ob.mitigated:
@@ -217,21 +257,42 @@ class ConfluenceEngine(AlphaStackStep):
         for fvg in context.smc.fvgs:
             if fvg.direction == final_direction and not fvg.filled:
                 smc_score = max(smc_score, 0.5)
+        for bb in context.smc.breaker_blocks:
+            if bb.direction == final_direction:
+                smc_score = max(smc_score, 0.6)
+        # Bonus from premium/discount zone
+        zone = context.market_data.get("smc_zone", "neutral")
+        if final_direction == Direction.LONG and zone == "discount":
+            smc_score = min(smc_score + 0.2, 1.0)
+        elif final_direction == Direction.SHORT and zone == "premium":
+            smc_score = min(smc_score + 0.2, 1.0)
         component_scores["smc"] = smc_score
 
-        # RSI
+        # RSI (signal + divergence + momentum)
         rsi_score = 0.0
         if votes["rsi"] == final_direction:
             rsi_score = 0.8
         elif rsi_div_vote == final_direction:
             rsi_score = 0.6
+        # RSI trendline break bonus
+        rsi_tl_break = context.market_data.get("rsi_trendline_break", "none")
+        if (final_direction == Direction.LONG and rsi_tl_break == "bullish_break"):
+            rsi_score = min(rsi_score + 0.2, 1.0)
+        elif (final_direction == Direction.SHORT and rsi_tl_break == "bearish_break"):
+            rsi_score = min(rsi_score + 0.2, 1.0)
         component_scores["rsi"] = rsi_score
 
-        # Candlestick
+        # Candlestick (pattern strength)
         candle_score = 0.0
         for p in context.candlestick.patterns:
             if p.direction == final_direction:
                 candle_score = max(candle_score, p.strength)
+        # Bonus for multiple agreeing patterns
+        agreeing_patterns = sum(
+            1 for p in context.candlestick.patterns if p.direction == final_direction
+        )
+        if agreeing_patterns >= 2:
+            candle_score = min(candle_score + 0.15, 1.0)
         component_scores["candlestick"] = candle_score
 
         # --- Phase 4: Weighted confluence score ---
@@ -241,16 +302,22 @@ class ConfluenceEngine(AlphaStackStep):
         # Map to 0-100
         confluence_score = max(0.0, min(raw_score * 100, 100.0))
 
-        # Require minimum consensus: at least N components must agree
+        # --- Phase 5: Component agreement check ---
         min_agreeing = strategy_params.get("confluence.min_agreeing_components", 3)
         agreeing = sum(1 for v in votes.values() if v == final_direction)
+
+        # Direction decision: require minimum consensus
         if agreeing < min_agreeing:
             final_direction = Direction.NONE
 
-        # Direction decision: require score above threshold
+        # Also require score above threshold
         threshold = strategy_params.get("confluence.threshold", 40)
         if confluence_score < threshold:
             final_direction = Direction.NONE
+
+        # --- Compute agreement ratio for confidence ---
+        total_votes = len(votes)
+        agreement_ratio = agreeing / total_votes if total_votes > 0 else 0.0
 
         confluence = ConfluenceResult(
             score=round(confluence_score, 2),
@@ -258,4 +325,11 @@ class ConfluenceEngine(AlphaStackStep):
             component_scores=component_scores,
         )
 
-        return context.update(confluence=confluence)
+        # Store agreement metrics in market_data for journal
+        md = dict(context.market_data)
+        md["confluence_agreement_ratio"] = round(agreement_ratio, 3)
+        md["confluence_agreeing_count"] = agreeing
+        md["confluence_long_weight"] = round(long_weight, 3)
+        md["confluence_short_weight"] = round(short_weight, 3)
+
+        return context.update(confluence=confluence, market_data=md)

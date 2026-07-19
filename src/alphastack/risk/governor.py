@@ -96,7 +96,7 @@ class RiskGovernor:
 
     def __init__(
         self,
-        account_balance: float = 1000.0,
+        account_balance: float = 7.0,
         on_event: RiskEventCallback | None = None,
     ) -> None:
         settings = get_settings().risk
@@ -108,10 +108,17 @@ class RiskGovernor:
         if on_event:
             self._event_subscribers.append(on_event)
 
-        # Sub-systems
+        # Progressive sizing override state
+        self._size_reduction_active = False
+        self._size_reduction_factor = settings.size_reduction_factor
+
+        # Sub-systems — calibrated for $7 micro-account
         self.position_sizer = PositionSizer(
             account_balance=account_balance,
             max_position_pct=settings.max_position_size_pct,
+            default_risk_pct=settings.max_risk_per_trade_pct,
+            max_risk_pct=settings.max_risk_per_trade_pct,
+            max_leverage=settings.max_leverage_forex,
         )
         self.drawdown_manager = DrawdownManager(
             account_balance=account_balance,
@@ -120,23 +127,38 @@ class RiskGovernor:
         )
         self.circuit_breaker = CircuitBreaker(
             max_daily_loss_pct=settings.max_daily_loss_pct,
-            max_consecutive_losses=5,
+            max_consecutive_losses=settings.consecutive_loss_pause_threshold,
+            account_balance=account_balance,
+            cooldown_minutes=settings.pause_duration_minutes,
         )
         self.correlation_monitor = CorrelationMonitor(
             max_correlation=settings.max_correlation,
+            max_same_direction_exposure=2,  # tighter for micro-accounts
         )
         self.exposure_manager = ExposureManager(
             max_open_positions=settings.max_open_positions,
-            max_leverage=settings.max_leverage,
+            max_per_pair_pct=40.0,     # max 40% in one pair ($2.80)
+            max_per_session_pct=60.0,  # max 60% in one session ($4.20)
+            max_leverage=settings.max_leverage_forex,
         )
-        self.trade_validator = TradeValidator()
+        self.trade_validator = TradeValidator(
+            min_size=0.01,  # broker minimum lot
+            max_size=1.0,   # sanity cap for micro-account
+        )
+
+        # Config references for progressive circuit breaker
+        self._consecutive_reduce_threshold = settings.consecutive_loss_reduce_threshold
+        self._consecutive_pause_threshold = settings.consecutive_loss_pause_threshold
 
         log.info(
             "risk_governor_initialized",
             balance=account_balance,
+            max_risk_per_trade_pct=settings.max_risk_per_trade_pct,
             max_daily_loss_pct=settings.max_daily_loss_pct,
             max_drawdown_pct=settings.max_drawdown_pct,
             max_positions=settings.max_open_positions,
+            max_leverage_forex=settings.max_leverage_forex,
+            max_leverage_crypto=settings.max_leverage_crypto,
         )
 
     # -- Event system -------------------------------------------------------
@@ -181,12 +203,42 @@ class RiskGovernor:
         self.drawdown_manager.update_balance(new_balance)
 
     def record_trade_result(self, pnl: float) -> None:
-        """Record a completed trade's P&L across all risk sub-systems."""
+        """Record a completed trade's P&L across all risk sub-systems.
+
+        Progressive circuit breaker logic:
+        - 3 consecutive losses → reduce position size 50%
+        - 5 consecutive losses → pause trading 1 hour
+        - Daily loss limit hit → stop trading for the day
+        """
         self.drawdown_manager.record_pnl(pnl)
         self.circuit_breaker.record_loss(pnl)
         self.update_balance(self._balance + pnl)
 
-        # Check if circuit breakers tripped
+        consecutive = self.circuit_breaker.consecutive_losses
+
+        # Progressive response: reduce size after N consecutive losses
+        if consecutive >= self._consecutive_reduce_threshold and not self._size_reduction_active:
+            self._size_reduction_active = True
+            self._size_reduction_factor = max(
+                0.10,  # never go below 10%
+                self._size_reduction_factor ** (consecutive - self._consecutive_reduce_threshold + 1),
+            )
+            self._publish(RiskEvent(
+                event_type=RiskEventType.POSITION_RESIZED,
+                severity="warning",
+                details={
+                    "reason": f"{consecutive} consecutive losses — size reduced to {self._size_reduction_factor:.0%}",
+                    "consecutive_losses": consecutive,
+                    "reduction_factor": self._size_reduction_factor,
+                },
+            ))
+            log.warning(
+                "progressive_size_reduction",
+                consecutive_losses=consecutive,
+                reduction_factor=self._size_reduction_factor,
+            )
+
+        # Full halt at pause threshold
         if self.circuit_breaker.is_tripped:
             self._halted = True
             self._halt_reason = self.circuit_breaker.trip_reason
@@ -196,12 +248,26 @@ class RiskGovernor:
                 details={
                     "reason": self._halt_reason,
                     "daily_pnl": self.circuit_breaker.daily_pnl,
-                    "consecutive_losses": self.circuit_breaker.consecutive_losses,
+                    "consecutive_losses": consecutive,
                 },
             ))
 
-        # Check drawdown warnings
+        # Daily loss limit → halt for the day
         dd_state = self.drawdown_manager.state
+        if dd_state.daily_pct >= self.drawdown_manager.max_daily_pct:
+            self._halted = True
+            self._halt_reason = f"Daily loss limit hit: {dd_state.daily_pct:.2f}% >= {self.drawdown_manager.max_daily_pct}%"
+            self._publish(RiskEvent(
+                event_type=RiskEventType.HALT_TRADING,
+                severity="critical",
+                details={
+                    "reason": self._halt_reason,
+                    "daily_pct": dd_state.daily_pct,
+                    "daily_pnl": dd_state.daily_pnl,
+                },
+            ))
+
+        # Drawdown warning at 80% of limit
         if dd_state.total_pct > self.drawdown_manager.max_total_pct * 0.8:
             self._publish(RiskEvent(
                 event_type=RiskEventType.DRAWDOWN_WARNING,
@@ -232,11 +298,19 @@ class RiskGovernor:
             return
         self._halted = False
         self._halt_reason = ""
+        self._size_reduction_active = False
+        self._size_reduction_factor = get_settings().risk.size_reduction_factor
         self._publish(RiskEvent(
             event_type=RiskEventType.RESUME_TRADING,
             severity="info",
         ))
         log.info("trading_resumed")
+
+    def reset_progressive_breaker(self) -> None:
+        """Reset progressive size reduction after consecutive losses recover."""
+        self._size_reduction_active = False
+        self._size_reduction_factor = get_settings().risk.size_reduction_factor
+        log.info("progressive_breaker_reset")
 
     # -- Core approval flow -------------------------------------------------
 
@@ -312,8 +386,16 @@ class RiskGovernor:
             stop_loss=request.stop_loss,
             account_balance=self._balance,
             daily_drawdown_pct=self.drawdown_manager.state.daily_pct,
+            max_risk_pct=get_settings().risk.max_risk_per_trade_pct,
         ))
         adjusted_size = min(request.requested_size, sizing_result.max_size)
+
+        # Apply progressive circuit breaker reduction
+        if self._size_reduction_active:
+            adjusted_size *= self._size_reduction_factor
+            warnings.append(
+                f"Size reduced {self._size_reduction_factor:.0%} due to consecutive losses"
+            )
 
         if adjusted_size < request.requested_size:
             warnings.append(
@@ -383,10 +465,27 @@ class RiskGovernor:
 
     def status(self) -> dict[str, Any]:
         """Return full risk system status."""
+        settings = get_settings().risk
         return {
             "halted": self._halted,
             "halt_reason": self._halt_reason,
             "balance": self._balance,
+            "risk_limits": {
+                "max_risk_per_trade_pct": settings.max_risk_per_trade_pct,
+                "max_risk_per_trade_abs": round(self._balance * settings.max_risk_per_trade_pct / 100, 2),
+                "max_daily_loss_pct": settings.max_daily_loss_pct,
+                "max_daily_loss_abs": round(self._balance * settings.max_daily_loss_pct / 100, 2),
+                "max_drawdown_pct": settings.max_drawdown_pct,
+                "max_drawdown_abs": round(self._balance * settings.max_drawdown_pct / 100, 2),
+                "max_open_positions": settings.max_open_positions,
+                "max_leverage_forex": settings.max_leverage_forex,
+                "max_leverage_crypto": settings.max_leverage_crypto,
+            },
+            "progressive_breaker": {
+                "active": self._size_reduction_active,
+                "reduction_factor": self._size_reduction_factor,
+                "consecutive_losses": self.circuit_breaker.consecutive_losses,
+            },
             "drawdown": self.drawdown_manager.state.model_dump(),
             "circuit_breaker": {
                 "tripped": self.circuit_breaker.is_tripped,
