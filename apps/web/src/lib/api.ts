@@ -1,15 +1,41 @@
-const BASE = "/api/v1";
+/**
+ * API client for AlphaStack backend.
+ *
+ * All requests go through Next.js server-side API proxy routes
+ * (src/app/api/...) which forward to the Python backend.
+ *
+ * Backend API prefix: /api/v1/ for most routes, / for system routes.
+ */
 
-async function request<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+import type {
+  Position,
+  PnLSummary,
+  PerformanceMetrics,
+  Trade,
+  TradeListResponse,
+  TradeCreate,
+  Signal,
+  SignalListResponse,
+  EquityCurveResponse,
+  WinRateResponse,
+  PnlHistoryPoint,
+  RiskMetrics,
+  HealthResponse,
+  SystemStatus,
+  AppSettings,
+  SettingsUpdateResponse,
+  OrchestratorHealth,
+} from "@/types";
+
+// ─── Base request helper ──────────────────────────────────────────────────────
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
   });
+
   if (!res.ok) {
-    // FastAPI returns errors as {"detail": "..."}
     let msg: string;
     try {
       const body = await res.json();
@@ -19,59 +45,150 @@ async function request<T>(
     }
     throw new Error(`API ${res.status}: ${msg}`);
   }
+
   return res.json();
 }
 
-// Portfolio
-// Server: GET /portfolio → positions list, GET /portfolio/pnl → P&L summary,
-//         GET /portfolio/performance → performance metrics
-export const getPortfolio = () => request("/portfolio");
-export const getPortfolioPnl = () => request("/portfolio/pnl");
-export const getPortfolioPerformance = () =>
-  request("/portfolio/performance");
+// ─── Portfolio ────────────────────────────────────────────────────────────────
 
-// Positions (alias — server returns positions at /portfolio)
-export const getPositions = () => request("/portfolio");
+/** Current open positions. */
+export const getPositions = (): Promise<Position[]> =>
+  request("/api/portfolio");
 
-// Trades
-// Server uses page_size (not limit)
-export const getTrades = (pageSize = 100) =>
-  request(`/trades?page_size=${pageSize}`);
-export const getTrade = (id: string) => request(`/trades/${id}`);
+/** P&L summary across all trades. */
+export const getPortfolioPnl = (): Promise<PnLSummary> =>
+  request("/api/portfolio/pnl");
 
-// Signals
-export const getSignals = (params?: Record<string, string>) => {
-  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-  return request(`/signals${qs}`);
-};
-// Server has no single-signal endpoint; fetch list and filter client-side
-export const getSignal = async (id: string) => {
-  const data = await request<{ signals: Array<{ id: string }> }>(
-    `/signals/history`
-  );
-  const found = data.signals.find((s) => s.id === id);
-  if (!found) throw new Error(`Signal ${id} not found`);
-  return found;
-};
+/** Portfolio performance metrics. */
+export const getPerformance = (): Promise<PerformanceMetrics> =>
+  request("/api/portfolio/performance");
 
-// Analytics — wired to server's actual endpoints
-export const getPerformance = () => request("/portfolio/performance");
-export const getEquityCurve = (_days = 90) =>
-  // No dedicated equity-curve endpoint yet; return PnL summary as proxy
-  request("/portfolio/pnl");
-export const getWinRate = () => request("/portfolio/pnl");
+// ─── Trades ───────────────────────────────────────────────────────────────────
 
-// Settings — server has no /settings yet; uses /config for read-only
-export const getSettings = () => request("/config");
-export const updateSettings = async (data: Record<string, unknown>) => {
-  // No PUT /settings on server yet; return current config as acknowledgment
-  console.warn("Settings update not yet supported by server", data);
-  return request("/config");
+/** List trades with pagination and optional filters. */
+export const getTrades = (params?: {
+  page?: number;
+  page_size?: number;
+  status?: string;
+  symbol?: string;
+}): Promise<TradeListResponse> => {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
+  if (params?.status) qs.set("status", params.status);
+  if (params?.symbol) qs.set("symbol", params.symbol);
+  const query = qs.toString();
+  return request(`/api/trades${query ? `?${query}` : ""}`);
 };
 
-// Health — lives at root /health, not under /api/v1
-export const getHealth = async () => {
-  const res = await fetch("/health");
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-  return res.json();
+/** Get a single trade by ID. */
+export const getTrade = (id: string): Promise<Trade> =>
+  request(`/api/trades/${id}`);
+
+/** Create a new trade. */
+export const createTrade = (data: TradeCreate): Promise<Trade> =>
+  request("/api/trades", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+/** Close an open trade. */
+export const closeTrade = (
+  id: string,
+  exitPrice?: number
+): Promise<Trade> => {
+  const qs = exitPrice != null ? `?exit_price=${exitPrice}` : "";
+  return request(`/api/trades/${id}/close${qs}`, { method: "PUT" });
 };
+
+// ─── Signals ──────────────────────────────────────────────────────────────────
+
+/** List active signals. */
+export const getSignals = (params?: {
+  symbol?: string;
+  strategy_id?: string;
+}): Promise<SignalListResponse> => {
+  const qs = new URLSearchParams();
+  if (params?.symbol) qs.set("symbol", params.symbol);
+  if (params?.strategy_id) qs.set("strategy_id", params.strategy_id);
+  const query = qs.toString();
+  return request(`/api/signals${query ? `?${query}` : ""}`);
+};
+
+/** Signal history (all signals). */
+export const getSignalHistory = (params?: {
+  page?: number;
+  page_size?: number;
+  symbol?: string;
+}): Promise<SignalListResponse> => {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
+  if (params?.symbol) qs.set("symbol", params.symbol);
+  const query = qs.toString();
+  return request(`/api/signals/history${query ? `?${query}` : ""}`);
+};
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+/** Performance metrics (delegates to portfolio performance). */
+export const getAnalyticsPerformance = (): Promise<PerformanceMetrics> =>
+  request("/api/analytics/performance");
+
+/** Equity curve over time. */
+export const getEquityCurve = (
+  days = 90
+): Promise<EquityCurveResponse> =>
+  request(`/api/analytics/equity-curve?days=${days}`);
+
+/** Win/loss statistics. */
+export const getWinRate = (): Promise<WinRateResponse> =>
+  request("/api/analytics/win-rate");
+
+/** Daily PnL history. */
+export const getPnlHistory = (period = "30d"): Promise<PnlHistoryPoint[]> =>
+  request(`/api/analytics/pnl-history?period=${period}`);
+
+/** Risk analytics. */
+export const getRiskMetrics = (): Promise<RiskMetrics> =>
+  request("/api/analytics/risk");
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+/** Get current runtime settings. */
+export const getSettings = (): Promise<AppSettings> =>
+  request("/api/settings");
+
+/** Update runtime settings (partial). */
+export const updateSettings = (
+  data: Partial<AppSettings>
+): Promise<SettingsUpdateResponse> =>
+  request("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
+// ─── System ───────────────────────────────────────────────────────────────────
+
+/** Health check. */
+export const getHealth = (): Promise<HealthResponse> =>
+  request("/api/system/health");
+
+/** System status. */
+export const getSystemStatus = (): Promise<SystemStatus> =>
+  request("/api/system/status");
+
+/** Orchestrator health. */
+export const getOrchestratorHealth = (): Promise<OrchestratorHealth> =>
+  request("/api/system/orchestrator/health");
+
+/** Trigger orchestrator run. */
+export const triggerOrchestratorRun = (data: {
+  symbol?: string;
+  timeframe?: string;
+  market_data?: Record<string, unknown>;
+}): Promise<unknown> =>
+  request("/api/system/orchestrator/run", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });

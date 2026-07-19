@@ -1,5 +1,5 @@
 # AlphaStack Prometheus Alert Rules
-# Based on IMPLEMENTATION_QUALITY.md alerting definitions
+# Covers: trading, risk, agents, infrastructure, MT5 bridge
 groups:
   - name: alphastack_trading
     rules:
@@ -103,7 +103,7 @@ groups:
         annotations:
           summary: "{{ $labels.agent_name }} eval pass rate dropped to {{ $value }}"
 
-      # ─── Info: No signals generated ──────────────────────────
+      # ─── Warning: No signals generated ──────────────────────
       - alert: NoSignalsGenerated
         expr: increase(alphastack_signals_total[2h]) == 0
         for: 2h
@@ -187,3 +187,37 @@ groups:
           severity: warning
         annotations:
           summary: "Database connection pool > 80% utilized"
+
+  - name: alphastack_mt5_bridge
+    rules:
+      - alert: MT5BridgeDown
+        expr: up{job="alphastack-mt5-bridge"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MT5 Bridge is down — forex trading halted"
+
+      - alert: MT5Disconnected
+        expr: mt5_bridge_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MT5 terminal not connected — check bridge logs"
+
+      - alert: MT5OrderRejectionHigh
+        expr: rate(mt5_bridge_orders_rejected[10m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MT5 order rejection rate elevated — {{ $value }}/min"
+
+      - alert: MT5OrderLatencyHigh
+        expr: histogram_quantile(0.95, rate(mt5_bridge_order_latency_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MT5 order P95 latency at {{ $value }}s"

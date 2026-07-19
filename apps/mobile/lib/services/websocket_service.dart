@@ -82,6 +82,8 @@ class WebSocketService {
       StreamController<Map<String, dynamic>>.broadcast();
   final _priceUpdateController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _agentStatusController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   // Public streams
   Stream<WebSocketState> get stateStream => _stateController.stream;
@@ -96,6 +98,8 @@ class WebSocketService {
       _portfolioUpdateController.stream;
   Stream<Map<String, dynamic>> get priceUpdates =>
       _priceUpdateController.stream;
+  Stream<Map<String, dynamic>> get agentStatusUpdates =>
+      _agentStatusController.stream;
 
   WebSocketState get state => _state;
   bool get isConnected => _state == WebSocketState.connected;
@@ -104,6 +108,26 @@ class WebSocketService {
   static final WebSocketService _instance = WebSocketService._internal();
   factory WebSocketService() => _instance;
   WebSocketService._internal();
+
+  /// Derive WS URL from stored API base URL.
+  Future<String> get _resolvedWsUrl async {
+    final stored = await _storage.read(key: _wsUrlKey);
+    if (stored != null && stored.isNotEmpty) return stored;
+
+    // Derive from REST base URL
+    final restBaseUrl = await _storage.read(key: 'api_base_url') ?? '';
+    if (restBaseUrl.isNotEmpty) {
+      // Convert https://host/api/v1 → wss://host/ws
+      // Convert http://host/api/v1 → ws://host/ws
+      try {
+        final uri = Uri.parse(restBaseUrl);
+        final scheme = uri.scheme == 'https' ? 'wss' : 'ws';
+        return '$scheme://${uri.host}${uri.port != 80 && uri.port != 443 ? ':${uri.port}' : ''}/ws';
+      } catch (_) {}
+    }
+
+    return _defaultWsUrl;
+  }
 
   /// Connect to the WebSocket server.
   ///
@@ -121,7 +145,7 @@ class WebSocketService {
     _setState(WebSocketState.connecting);
 
     try {
-      String wsUrl = await _storage.read(key: _wsUrlKey) ?? _defaultWsUrl;
+      String wsUrl = await _resolvedWsUrl;
 
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
@@ -129,7 +153,6 @@ class WebSocketService {
       await _channel!.ready;
 
       // The server requires auth as the FIRST message within 10 seconds.
-      // Send it immediately after connection is established.
       final authToken = await _storage.read(key: 'auth_token');
       if (authToken != null) {
         _send({'type': 'auth', 'token': authToken});
@@ -145,8 +168,7 @@ class WebSocketService {
         onDone: _onDone,
       );
 
-      // Note: We don't set state to "connected" here — we wait for
-      // the server's "auth_ok" message in _onMessage to confirm auth.
+      // We wait for auth_ok in _onMessage to confirm auth.
       _reconnectAttempts = 0;
 
       _startHeartbeat();
@@ -186,7 +208,6 @@ class WebSocketService {
         case 'auth_error':
           debugPrint('WebSocket auth error: ${message.data['detail']}');
           _setState(WebSocketState.error);
-          // Don't auto-reconnect on auth error — user needs to fix credentials
           break;
 
         // ── Broadcast channels (server → client) ─────────────
@@ -201,6 +222,7 @@ class WebSocketService {
           _signalUpdateController.add(message.data);
           break;
         case 'system':
+          _agentStatusController.add(message.data);
           debugPrint('System: ${message.data}');
           break;
 
@@ -214,7 +236,6 @@ class WebSocketService {
 
         // ── Server heartbeat → respond with pong ─────────────
         case 'heartbeat':
-          // Server sends periodic heartbeats; respond to keep connection alive
           _send({'type': 'pong'});
           break;
 
@@ -323,5 +344,6 @@ class WebSocketService {
     _tradeUpdateController.close();
     _portfolioUpdateController.close();
     _priceUpdateController.close();
+    _agentStatusController.close();
   }
 }

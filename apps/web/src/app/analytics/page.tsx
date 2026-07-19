@@ -2,25 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { TradingChart, OHLCData } from "@/components/Charts/TradingChart";
+import { DrawdownChart } from "@/components/Charts/DrawdownChart";
 import { clsx } from "clsx";
 import {
   TrendingUp,
   Target,
   BarChart3,
   Calendar,
+  Shield,
+  Activity,
 } from "lucide-react";
-
-interface PerformanceMetrics {
-  totalTrades: number;
-  winRate: number;
-  profitFactor: number;
-  sharpeRatio: number;
-  maxDrawdown: number;
-  avgWin: number;
-  avgLoss: number;
-  bestTrade: number;
-  worstTrade: number;
-}
+import type {
+  PerformanceMetrics,
+  EquityCurveResponse,
+  WinRateResponse,
+  RiskMetrics,
+} from "@/types";
+import * as api from "@/lib/api";
 
 function MetricCard({
   label,
@@ -56,34 +54,54 @@ function MetricCard({
 }
 
 export default function AnalyticsPage() {
-  const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
-  const [equityCurve, setEquityCurve] = useState<OHLCData[]>([]);
+  const [performance, setPerformance] = useState<PerformanceMetrics | null>(null);
+  const [equityCurve, setEquityCurve] = useState<EquityCurveResponse | null>(null);
+  const [winRate, setWinRate] = useState<WinRateResponse | null>(null);
+  const [risk, setRisk] = useState<RiskMetrics | null>(null);
   const [days, setDays] = useState(90);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/analytics/performance")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setMetrics)
-      .catch(() => {});
-
-    fetch(`/api/analytics/equity-curve?days=${days}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setEquityCurve)
-      .catch(() => {});
+    const fetchAll = async () => {
+      setLoading(true);
+      try {
+        const [perf, eq, wr, rm] = await Promise.allSettled([
+          api.getAnalyticsPerformance(),
+          api.getEquityCurve(days),
+          api.getWinRate(),
+          api.getRiskMetrics(),
+        ]);
+        if (perf.status === "fulfilled") setPerformance(perf.value);
+        if (eq.status === "fulfilled") setEquityCurve(eq.value);
+        if (wr.status === "fulfilled") setWinRate(wr.value);
+        if (rm.status === "fulfilled") setRisk(rm.value);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAll();
   }, [days]);
 
-  // Fallback demo metrics
-  const m: PerformanceMetrics = metrics ?? {
-    totalTrades: 0,
-    winRate: 0,
-    profitFactor: 0,
-    sharpeRatio: 0,
-    maxDrawdown: 0,
-    avgWin: 0,
-    avgLoss: 0,
-    bestTrade: 0,
-    worstTrade: 0,
-  };
+  // Build equity chart data from equity curve points
+  const equityChartData: OHLCData[] =
+    equityCurve?.points.map((p) => ({
+      time: p.date,
+      open: p.equity,
+      high: p.equity,
+      low: p.equity,
+      close: p.equity,
+    })) ?? [];
+
+  // Drawdown data
+  const drawdownData =
+    equityCurve?.points.map((p) => ({
+      date: p.date,
+      drawdown: p.drawdown_pct,
+    })) ?? [];
+
+  const m = performance;
+  const wr = winRate;
+  const r = risk;
 
   return (
     <div className="space-y-6">
@@ -105,60 +123,124 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {/* Performance metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
-          label="Total Trades"
-          value={m.totalTrades.toString()}
-          icon={BarChart3}
-        />
-        <MetricCard
-          label="Win Rate"
-          value={`${m.winRate.toFixed(1)}%`}
-          icon={Target}
-          color={m.winRate >= 50 ? "green" : "red"}
-        />
-        <MetricCard
-          label="Profit Factor"
-          value={m.profitFactor.toFixed(2)}
+          label="Total Return"
+          value={m ? `${m.total_return_pct.toFixed(2)}%` : "—"}
           icon={TrendingUp}
-          color={m.profitFactor >= 1 ? "green" : "red"}
+          color={m && m.total_return_pct >= 0 ? "green" : "red"}
         />
         <MetricCard
           label="Sharpe Ratio"
-          value={m.sharpeRatio.toFixed(2)}
+          value={m ? m.sharpe_ratio.toFixed(2) : "—"}
+          icon={BarChart3}
+          color={m && m.sharpe_ratio >= 1 ? "green" : "red"}
+        />
+        <MetricCard
+          label="Sortino Ratio"
+          value={m ? m.sortino_ratio.toFixed(2) : "—"}
           icon={TrendingUp}
-          color={m.sharpeRatio >= 1 ? "green" : "red"}
+          color={m && m.sortino_ratio >= 1 ? "green" : "red"}
+        />
+        <MetricCard
+          label="Max Drawdown"
+          value={m ? `${m.max_drawdown_pct.toFixed(2)}%` : "—"}
+          icon={TrendingUp}
+          color="red"
         />
       </div>
 
+      {/* Win/loss stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
-          label="Max Drawdown"
-          value={`${m.maxDrawdown.toFixed(2)}%`}
+          label="Total Trades"
+          value={wr ? wr.total_trades.toString() : "—"}
+          icon={Target}
+        />
+        <MetricCard
+          label="Win Rate"
+          value={wr ? `${wr.win_rate.toFixed(1)}%` : "—"}
+          icon={Target}
+          color={wr && wr.win_rate >= 50 ? "green" : "red"}
+        />
+        <MetricCard
+          label="Profit Factor"
+          value={wr ? wr.profit_factor.toFixed(2) : "—"}
           icon={TrendingUp}
-          color="red"
+          color={wr && wr.profit_factor >= 1 ? "green" : "red"}
         />
         <MetricCard
           label="Avg Win"
-          value={`$${m.avgWin.toFixed(2)}`}
-          icon={TrendingUp}
-          color="green"
-        />
-        <MetricCard
-          label="Avg Loss"
-          value={`$${m.avgLoss.toFixed(2)}`}
-          icon={TrendingUp}
-          color="red"
-        />
-        <MetricCard
-          label="Best Trade"
-          value={`$${m.bestTrade.toFixed(2)}`}
+          value={wr ? `$${wr.avg_win.toFixed(2)}` : "—"}
           icon={TrendingUp}
           color="green"
         />
       </div>
 
-      <TradingChart data={equityCurve} height={400} symbol="Equity Curve" />
+      {/* Risk metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <MetricCard
+          label="VaR (95%)"
+          value={r ? `$${r.var_95.toFixed(2)}` : "—"}
+          icon={Shield}
+          color="red"
+        />
+        <MetricCard
+          label="Max Consec. Losses"
+          value={r ? r.max_consecutive_losses.toString() : "—"}
+          icon={Activity}
+          color={r && r.max_consecutive_losses > 5 ? "red" : undefined}
+        />
+        <MetricCard
+          label="Risk/Reward Avg"
+          value={r ? r.risk_reward_avg.toFixed(2) : "—"}
+          icon={TrendingUp}
+          color={r && r.risk_reward_avg >= 1.5 ? "green" : "red"}
+        />
+        <MetricCard
+          label="Calmar Ratio"
+          value={m ? m.calmar_ratio.toFixed(2) : "—"}
+          icon={BarChart3}
+          color={m && m.calmar_ratio >= 1 ? "green" : "red"}
+        />
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TradingChart
+          data={equityChartData}
+          height={400}
+          symbol={`Equity Curve (${equityCurve?.current_equity.toFixed(2) ?? "—"})`}
+        />
+        <DrawdownChart data={drawdownData} height={400} />
+      </div>
+
+      {/* Equity curve summary */}
+      {equityCurve && (
+        <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <p className="text-xs text-brand-muted">Initial Capital</p>
+              <p className="text-lg font-mono font-semibold">
+                ${equityCurve.initial_capital.toFixed(2)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-muted">Current Equity</p>
+              <p className="text-lg font-mono font-semibold text-brand-green">
+                ${equityCurve.current_equity.toFixed(2)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-muted">Trading Days</p>
+              <p className="text-lg font-mono font-semibold">
+                {m?.trading_days ?? equityCurve.points.length}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

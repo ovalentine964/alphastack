@@ -6,12 +6,12 @@ part 'trade.g.dart';
 class Trade {
   final String id;
   final String symbol;
-  @JsonKey(unknownEnumValue: TradeSide.long)
+  @JsonKey(unknownEnumValue: TradeSide.buy)
   final TradeSide side;
   @JsonKey(unknownEnumValue: TradeStatus.open)
   final TradeStatus status;
   @JsonKey(name: 'entry_price')
-  final double entryPrice;
+  final double? entryPrice;
   @JsonKey(name: 'exit_price')
   final double? exitPrice;
   final double quantity;
@@ -33,7 +33,7 @@ class Trade {
     required this.symbol,
     required this.side,
     required this.status,
-    required this.entryPrice,
+    this.entryPrice,
     this.exitPrice,
     required this.quantity,
     this.pnl,
@@ -50,16 +50,18 @@ class Trade {
 
   bool get isOpen => status == TradeStatus.open;
   bool get isClosed => status == TradeStatus.closed;
+  bool get isCancelled => status == TradeStatus.cancelled;
+  bool get isPending => status == TradeStatus.pending;
   bool get isProfit => (pnl ?? 0) > 0;
-  bool get isLong => side == TradeSide.long;
+  bool get isLong => side == TradeSide.buy;
 
   double get unrealizedPnl => pnl ?? 0;
   Duration get duration => (closedAt ?? DateTime.now()).difference(openedAt);
 
   /// Compute P&L percent from entry/exit prices when not provided by server.
   double? get pnlPercent {
-    if (pnl == null) return null;
-    final base = entryPrice * quantity;
+    if (pnl == null || entryPrice == null || entryPrice == 0) return null;
+    final base = entryPrice! * quantity;
     if (base == 0) return null;
     return (pnl! / base) * 100;
   }
@@ -74,7 +76,7 @@ class Trade {
 @JsonSerializable()
 class Position {
   final String symbol;
-  @JsonKey(unknownEnumValue: TradeSide.long)
+  @JsonKey(unknownEnumValue: TradeSide.buy)
   final TradeSide side;
   final double quantity;
   @JsonKey(name: 'entry_price')
@@ -85,7 +87,7 @@ class Position {
   final double unrealizedPnl;
   @JsonKey(name: 'unrealized_pnl_pct')
   final double unrealizedPnlPercent;
-  @JsonKey(name: 'weight_pct')
+  @JsonKey(name: 'weight_pct', defaultValue: 0)
   final double weightPct;
 
   const Position({
@@ -104,19 +106,49 @@ class Position {
   Map<String, dynamic> toJson() => _$PositionToJson(this);
 
   bool get isProfit => unrealizedPnl > 0;
-  bool get isLong => side == TradeSide.long;
+  bool get isLong => side == TradeSide.buy;
   double get positionValue => currentPrice * quantity;
 }
 
+@JsonSerializable()
+class TradeCreate {
+  final String symbol;
+  final String side;
+  final double quantity;
+  final double? price;
+  @JsonKey(name: 'stop_loss')
+  final double? stopLoss;
+  @JsonKey(name: 'take_profit')
+  final double? takeProfit;
+  @JsonKey(name: 'strategy_id')
+  final String? strategyId;
+  final String notes;
+
+  const TradeCreate({
+    required this.symbol,
+    required this.side,
+    required this.quantity,
+    this.price,
+    this.stopLoss,
+    this.takeProfit,
+    this.strategyId,
+    this.notes = '',
+  });
+
+  factory TradeCreate.fromJson(Map<String, dynamic> json) =>
+      _$TradeCreateFromJson(json);
+  Map<String, dynamic> toJson() => _$TradeCreateToJson(this);
+}
+
 enum TradeSide {
-  @JsonValue('long')
-  long,
-  @JsonValue('short')
-  short,
   @JsonValue('buy')
   buy,
   @JsonValue('sell')
   sell,
+  @JsonValue('long')
+  long,
+  @JsonValue('short')
+  short,
 }
 
 enum TradeStatus {

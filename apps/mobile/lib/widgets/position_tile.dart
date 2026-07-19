@@ -135,20 +135,20 @@ class _SideBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLong = side == TradeSide.long;
+    final isBuy = side == TradeSide.buy || side == TradeSide.long;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: (isLong ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed)
+        color: (isBuy ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed)
             .withAlpha(30),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        isLong ? 'LONG' : 'SHORT',
+        isBuy ? 'LONG' : 'SHORT',
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: isLong ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed,
+          color: isBuy ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed,
           letterSpacing: 0.5,
         ),
       ),

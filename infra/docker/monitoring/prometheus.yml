@@ -1,4 +1,5 @@
-# Prometheus configuration for AlphaStack
+# AlphaStack Prometheus Configuration
+# Scrapes all services: API, Engine, MT5 Bridge, Redis, PostgreSQL, Node
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -26,15 +27,14 @@ scrape_configs:
           service: "engine"
           environment: "production"
 
-  # ─── Prometheus self-monitoring ──────────────────────────────
-  - job_name: "prometheus"
+  # ─── MT5 Bridge ──────────────────────────────────────────────
+  - job_name: "alphastack-mt5-bridge"
+    metrics_path: "/metrics"
     static_configs:
-      - targets: ["localhost:9090"]
-
-  # ─── Node Exporter (host metrics) ───────────────────────────
-  - job_name: "node"
-    static_configs:
-      - targets: ["node-exporter:9100"]
+      - targets: ["mt5-bridge:8080"]
+        labels:
+          service: "mt5-bridge"
+          environment: "production"
 
   # ─── Redis Exporter ─────────────────────────────────────────
   - job_name: "alphastack-redis"
@@ -49,3 +49,13 @@ scrape_configs:
       - targets: ["postgres-exporter:9187"]
         labels:
           service: "postgres"
+
+  # ─── Node Exporter (host metrics) ───────────────────────────
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # ─── Prometheus self-monitoring ──────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

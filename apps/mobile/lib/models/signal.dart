@@ -6,12 +6,13 @@ part 'signal.g.dart';
 class Signal {
   final String id;
   final String symbol;
-  @JsonKey(name: 'direction')
+  @JsonKey(name: 'direction', unknownEnumValue: SignalDirection.long)
   final SignalDirection direction;
   @JsonKey(name: 'strength', unknownEnumValue: SignalStrength.moderate)
   final SignalStrength strength;
   @JsonKey(name: 'strategy_id')
   final String strategyId;
+  @JsonKey(defaultValue: 0.0)
   final double confidence;
   @JsonKey(name: 'entry_price')
   final double? entryPrice;
@@ -21,7 +22,12 @@ class Signal {
   final double? takeProfit;
   @JsonKey(name: 'risk_reward')
   final double? riskReward;
+  @JsonKey(defaultValue: '')
   final String reason;
+  @JsonKey(name: 'timeframe')
+  final String? timeframe;
+  @JsonKey(name: 'agent_id')
+  final String? agentId;
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
   @JsonKey(name: 'expires_at')
@@ -41,6 +47,8 @@ class Signal {
     this.takeProfit,
     this.riskReward,
     this.reason = '',
+    this.timeframe,
+    this.agentId,
     required this.createdAt,
     this.expiresAt,
     this.isActive = true,
@@ -54,6 +62,9 @@ class Signal {
 
   bool get isBuy =>
       direction == SignalDirection.long || direction == SignalDirection.buy;
+
+  bool get isSell =>
+      direction == SignalDirection.short || direction == SignalDirection.sell;
 
   bool get isExpired =>
       expiresAt != null && expiresAt!.isBefore(DateTime.now());
@@ -100,9 +111,12 @@ class Signal {
   /// For UI compatibility we split by comma or return a single-item list.
   List<String> get factors {
     if (reason.isEmpty) return [];
-    // If reason contains comma-separated items, split them.
     if (reason.contains(',')) {
-      return reason.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+      return reason
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
     }
     return [reason];
   }
@@ -112,10 +126,6 @@ class Signal {
 
   /// Backward-compat alias for UI screens that reference `strategy`.
   String? get strategy => strategyId;
-
-  /// Backward-compat alias for UI screens that reference `timeframe`.
-  /// The server doesn't provide this; return null.
-  String? get timeframe => null;
 }
 
 @JsonSerializable()
@@ -163,7 +173,6 @@ enum SignalStrength {
   veryStrong,
 }
 
-// Keep SignalStatus for backward compat with any code that references it.
 enum SignalStatus {
   @JsonValue('active')
   active,

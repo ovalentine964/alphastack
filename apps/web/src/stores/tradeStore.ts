@@ -1,95 +1,122 @@
 import { create } from "zustand";
+import type {
+  Position,
+  Trade,
+  TradeListResponse,
+  PnLSummary,
+  PerformanceMetrics,
+} from "@/types";
+import * as api from "@/lib/api";
 
-export interface Position {
-  id: string;
-  symbol: string;
-  side: "LONG" | "SHORT";
-  qty: number;
-  entry: number;
-  current: number;
-  pnl: number;
-  pnlPct: number;
-  openedAt: string;
+// ─── Portfolio slice ──────────────────────────────────────────────────────────
+
+interface PortfolioState {
+  positions: Position[];
+  pnl: PnLSummary | null;
+  performance: PerformanceMetrics | null;
+  positionsLoading: boolean;
+  pnlLoading: boolean;
+
+  fetchPositions: () => Promise<void>;
+  fetchPnl: () => Promise<void>;
+  fetchPerformance: () => Promise<void>;
+  updatePosition: (pos: Position) => void;
 }
 
-export interface Trade {
-  id: string;
-  symbol: string;
-  side: "BUY" | "SELL";
-  qty: number;
-  price: number;
-  pnl?: number;
-  strategy: string;
-  executedAt: string;
-}
-
-export interface Portfolio {
-  balance: number;
-  equity: number;
-  unrealizedPnl: number;
-  realizedPnl: number;
-  dayPnl: number;
-  totalReturn: number;
-}
+// ─── Trades slice ─────────────────────────────────────────────────────────────
 
 interface TradeState {
-  portfolio: Portfolio;
-  positions: Position[];
   trades: Trade[];
-  loading: boolean;
-  fetchPortfolio: () => Promise<void>;
-  fetchPositions: () => Promise<void>;
-  fetchTrades: (limit?: number) => Promise<void>;
-  updatePosition: (pos: Position) => void;
+  tradesTotal: number;
+  tradesLoading: boolean;
+
+  fetchTrades: (params?: {
+    page?: number;
+    page_size?: number;
+    status?: string;
+    symbol?: string;
+  }) => Promise<void>;
   addTrade: (trade: Trade) => void;
+  updateTrade: (trade: Trade) => void;
 }
 
-export const useTradeStore = create<TradeState>((set) => ({
-  portfolio: {
-    balance: 0,
-    equity: 0,
-    unrealizedPnl: 0,
-    realizedPnl: 0,
-    dayPnl: 0,
-    totalReturn: 0,
-  },
-  positions: [],
-  trades: [],
-  loading: false,
+// ─── Combined store ───────────────────────────────────────────────────────────
 
-  fetchPortfolio: async () => {
-    set({ loading: true });
-    try {
-      const res = await fetch("/api/portfolio");
-      if (res.ok) set({ portfolio: await res.json() });
-    } finally {
-      set({ loading: false });
-    }
-  },
+type StoreState = PortfolioState & TradeState;
+
+export const useTradeStore = create<StoreState>((set) => ({
+  // ── Portfolio state ───────────────────────────────────────────────────────
+  positions: [],
+  pnl: null,
+  performance: null,
+  positionsLoading: false,
+  pnlLoading: false,
 
   fetchPositions: async () => {
+    set({ positionsLoading: true });
     try {
-      const res = await fetch("/api/positions");
-      if (res.ok) set({ positions: await res.json() });
-    } catch {
-      /* ignore */
+      const positions = await api.getPositions();
+      set({ positions });
+    } catch (err) {
+      console.error("[store] fetchPositions failed:", err);
+    } finally {
+      set({ positionsLoading: false });
     }
   },
 
-  fetchTrades: async (limit = 100) => {
+  fetchPnl: async () => {
+    set({ pnlLoading: true });
     try {
-      const res = await fetch(`/api/trades?limit=${limit}`);
-      if (res.ok) set({ trades: await res.json() });
-    } catch {
-      /* ignore */
+      const pnl = await api.getPortfolioPnl();
+      set({ pnl });
+    } catch (err) {
+      console.error("[store] fetchPnl failed:", err);
+    } finally {
+      set({ pnlLoading: false });
+    }
+  },
+
+  fetchPerformance: async () => {
+    try {
+      const performance = await api.getPerformance();
+      set({ performance });
+    } catch (err) {
+      console.error("[store] fetchPerformance failed:", err);
     }
   },
 
   updatePosition: (pos) =>
     set((s) => ({
-      positions: s.positions.map((p) => (p.id === pos.id ? pos : p)),
+      positions: s.positions.map((p) =>
+        p.symbol === pos.symbol ? pos : p
+      ),
     })),
 
+  // ── Trades state ──────────────────────────────────────────────────────────
+  trades: [],
+  tradesTotal: 0,
+  tradesLoading: false,
+
+  fetchTrades: async (params) => {
+    set({ tradesLoading: true });
+    try {
+      const data: TradeListResponse = await api.getTrades(params);
+      set({ trades: data.trades, tradesTotal: data.total });
+    } catch (err) {
+      console.error("[store] fetchTrades failed:", err);
+    } finally {
+      set({ tradesLoading: false });
+    }
+  },
+
   addTrade: (trade) =>
-    set((s) => ({ trades: [trade, ...s.trades].slice(0, 200) })),
+    set((s) => ({
+      trades: [trade, ...s.trades].slice(0, 200),
+      tradesTotal: s.tradesTotal + 1,
+    })),
+
+  updateTrade: (trade) =>
+    set((s) => ({
+      trades: s.trades.map((t) => (t.id === trade.id ? trade : t)),
+    })),
 }));

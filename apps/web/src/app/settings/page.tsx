@@ -2,74 +2,74 @@
 
 import { useEffect, useState } from "react";
 import { Save, RefreshCw } from "lucide-react";
+import type { AppSettings } from "@/types";
+import * as api from "@/lib/api";
 
-interface Settings {
-  broker: {
-    name: string;
-    apiKey: string;
-    apiSecret: string;
-    paper: boolean;
-  };
-  risk: {
-    maxPositionSize: number;
-    maxDailyLoss: number;
-    maxDrawdown: number;
-    positionSizingMethod: string;
-  };
+const defaultSettings: AppSettings = {
   notifications: {
-    enabled: boolean;
-    onTrade: boolean;
-    onSignal: boolean;
-    onError: boolean;
-    webhookUrl: string;
-  };
-}
-
-const defaultSettings: Settings = {
-  broker: { name: "alpaca", apiKey: "", apiSecret: "", paper: true },
-  risk: {
-    maxPositionSize: 10000,
-    maxDailyLoss: 500,
-    maxDrawdown: 5,
-    positionSizingMethod: "fixed",
+    email_enabled: true,
+    push_enabled: true,
+    signal_alerts: true,
+    trade_alerts: true,
+    price_alerts: false,
   },
-  notifications: {
-    enabled: true,
-    onTrade: true,
-    onSignal: true,
-    onError: true,
-    webhookUrl: "",
+  display: {
+    theme: "dark",
+    language: "en",
+    timezone: "UTC",
+    currency: "USD",
+    decimal_places: 2,
+  },
+  risk: {
+    max_position_size_pct: 5.0,
+    max_daily_loss_pct: 2.0,
+    max_drawdown_pct: 10.0,
+    auto_stop_loss: true,
+    default_risk_reward: 2.0,
+  },
+  trading: {
+    default_order_type: "limit",
+    confirmation_required: true,
+    auto_close_on_target: false,
+    paper_trading: true,
   },
 };
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => (r.ok ? r.json() : defaultSettings))
+    api
+      .getSettings()
       .then(setSettings)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      if (res.ok) {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
-      }
+      const result = await api.updateSettings(settings);
+      setSettings(result.settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error("Save settings failed:", err);
     } finally {
       setSaving(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <RefreshCw size={24} className="animate-spin text-brand-muted" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl space-y-8">
@@ -89,36 +89,62 @@ export default function SettingsPage() {
         </button>
       </div>
 
-      {/* Broker Configuration */}
+      {/* Trading Preferences */}
       <section className="bg-brand-surface border border-brand-border rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold">Broker Configuration</h2>
+        <h2 className="text-lg font-semibold">Trading Preferences</h2>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-brand-muted mb-1">Broker</label>
+            <label className="block text-xs text-brand-muted mb-1">
+              Default Order Type
+            </label>
             <select
-              value={settings.broker.name}
+              value={settings.trading.default_order_type}
               onChange={(e) =>
                 setSettings({
                   ...settings,
-                  broker: { ...settings.broker, name: e.target.value },
+                  trading: {
+                    ...settings.trading,
+                    default_order_type: e.target.value,
+                  },
                 })
               }
               className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text focus:outline-none focus:ring-1 focus:ring-brand-green"
             >
-              <option value="alpaca">Alpaca</option>
-              <option value="interactive_brokers">Interactive Brokers</option>
-              <option value="binance">Binance</option>
+              <option value="market">Market</option>
+              <option value="limit">Limit</option>
+              <option value="stop">Stop</option>
+              <option value="stop_limit">Stop Limit</option>
             </select>
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-4">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                checked={settings.broker.paper}
+                checked={settings.trading.confirmation_required}
                 onChange={(e) =>
                   setSettings({
                     ...settings,
-                    broker: { ...settings.broker, paper: e.target.checked },
+                    trading: {
+                      ...settings.trading,
+                      confirmation_required: e.target.checked,
+                    },
+                  })
+                }
+                className="rounded border-brand-border bg-brand-bg text-brand-green focus:ring-brand-green"
+              />
+              <span className="text-sm">Confirm Orders</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.trading.paper_trading}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    trading: {
+                      ...settings.trading,
+                      paper_trading: e.target.checked,
+                    },
                   })
                 }
                 className="rounded border-brand-border bg-brand-bg text-brand-green focus:ring-brand-green"
@@ -127,36 +153,23 @@ export default function SettingsPage() {
             </label>
           </div>
         </div>
-        <div>
-          <label className="block text-xs text-brand-muted mb-1">API Key</label>
+        <label className="flex items-center gap-2 cursor-pointer">
           <input
-            type="password"
-            value={settings.broker.apiKey}
+            type="checkbox"
+            checked={settings.trading.auto_close_on_target}
             onChange={(e) =>
               setSettings({
                 ...settings,
-                broker: { ...settings.broker, apiKey: e.target.value },
+                trading: {
+                  ...settings.trading,
+                  auto_close_on_target: e.target.checked,
+                },
               })
             }
-            className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text placeholder:text-brand-muted focus:outline-none focus:ring-1 focus:ring-brand-green"
-            placeholder="Enter API key"
+            className="rounded border-brand-border bg-brand-bg text-brand-green focus:ring-brand-green"
           />
-        </div>
-        <div>
-          <label className="block text-xs text-brand-muted mb-1">API Secret</label>
-          <input
-            type="password"
-            value={settings.broker.apiSecret}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                broker: { ...settings.broker, apiSecret: e.target.value },
-              })
-            }
-            className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text placeholder:text-brand-muted focus:outline-none focus:ring-1 focus:ring-brand-green"
-            placeholder="Enter API secret"
-          />
-        </div>
+          <span className="text-sm">Auto-close on target reached</span>
+        </label>
       </section>
 
       {/* Risk Parameters */}
@@ -165,15 +178,19 @@ export default function SettingsPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-brand-muted mb-1">
-              Max Position Size ($)
+              Max Position Size (%)
             </label>
             <input
               type="number"
-              value={settings.risk.maxPositionSize}
+              step="0.1"
+              value={settings.risk.max_position_size_pct}
               onChange={(e) =>
                 setSettings({
                   ...settings,
-                  risk: { ...settings.risk, maxPositionSize: Number(e.target.value) },
+                  risk: {
+                    ...settings.risk,
+                    max_position_size_pct: Number(e.target.value),
+                  },
                 })
               }
               className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text font-mono focus:outline-none focus:ring-1 focus:ring-brand-green"
@@ -181,15 +198,19 @@ export default function SettingsPage() {
           </div>
           <div>
             <label className="block text-xs text-brand-muted mb-1">
-              Max Daily Loss ($)
+              Max Daily Loss (%)
             </label>
             <input
               type="number"
-              value={settings.risk.maxDailyLoss}
+              step="0.1"
+              value={settings.risk.max_daily_loss_pct}
               onChange={(e) =>
                 setSettings({
                   ...settings,
-                  risk: { ...settings.risk, maxDailyLoss: Number(e.target.value) },
+                  risk: {
+                    ...settings.risk,
+                    max_daily_loss_pct: Number(e.target.value),
+                  },
                 })
               }
               className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text font-mono focus:outline-none focus:ring-1 focus:ring-brand-green"
@@ -201,11 +222,15 @@ export default function SettingsPage() {
             </label>
             <input
               type="number"
-              value={settings.risk.maxDrawdown}
+              step="0.1"
+              value={settings.risk.max_drawdown_pct}
               onChange={(e) =>
                 setSettings({
                   ...settings,
-                  risk: { ...settings.risk, maxDrawdown: Number(e.target.value) },
+                  risk: {
+                    ...settings.risk,
+                    max_drawdown_pct: Number(e.target.value),
+                  },
                 })
               }
               className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text font-mono focus:outline-none focus:ring-1 focus:ring-brand-green"
@@ -213,43 +238,61 @@ export default function SettingsPage() {
           </div>
           <div>
             <label className="block text-xs text-brand-muted mb-1">
-              Position Sizing
+              Default Risk/Reward
             </label>
-            <select
-              value={settings.risk.positionSizingMethod}
+            <input
+              type="number"
+              step="0.1"
+              value={settings.risk.default_risk_reward}
               onChange={(e) =>
                 setSettings({
                   ...settings,
-                  risk: { ...settings.risk, positionSizingMethod: e.target.value },
+                  risk: {
+                    ...settings.risk,
+                    default_risk_reward: Number(e.target.value),
+                  },
                 })
               }
-              className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text focus:outline-none focus:ring-1 focus:ring-brand-green"
-            >
-              <option value="fixed">Fixed Size</option>
-              <option value="percent">Percent of Equity</option>
-              <option value="kelly">Kelly Criterion</option>
-              <option value="volatility">Volatility-Based</option>
-            </select>
+              className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text font-mono focus:outline-none focus:ring-1 focus:ring-brand-green"
+            />
           </div>
         </div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.risk.auto_stop_loss}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                risk: {
+                  ...settings.risk,
+                  auto_stop_loss: e.target.checked,
+                },
+              })
+            }
+            className="rounded border-brand-border bg-brand-bg text-brand-green focus:ring-brand-green"
+          />
+          <span className="text-sm">Auto stop-loss</span>
+        </label>
       </section>
 
       {/* Notifications */}
       <section className="bg-brand-surface border border-brand-border rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-semibold">Notifications</h2>
         <div className="space-y-3">
-          {[
-            ["enabled", "Enable Notifications"],
-            ["onTrade", "Notify on Trades"],
-            ["onSignal", "Notify on Signals"],
-            ["onError", "Notify on Errors"],
-          ].map(([key, label]) => (
+          {(
+            [
+              ["email_enabled", "Email Notifications"],
+              ["push_enabled", "Push Notifications"],
+              ["signal_alerts", "Signal Alerts"],
+              ["trade_alerts", "Trade Alerts"],
+              ["price_alerts", "Price Alerts"],
+            ] as const
+          ).map(([key, label]) => (
             <label key={key} className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                checked={
-                  settings.notifications[key as keyof typeof settings.notifications] as boolean
-                }
+                checked={settings.notifications[key]}
                 onChange={(e) =>
                   setSettings({
                     ...settings,
@@ -265,25 +308,59 @@ export default function SettingsPage() {
             </label>
           ))}
         </div>
-        <div>
-          <label className="block text-xs text-brand-muted mb-1">
-            Webhook URL
-          </label>
-          <input
-            type="url"
-            value={settings.notifications.webhookUrl}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                notifications: {
-                  ...settings.notifications,
-                  webhookUrl: e.target.value,
-                },
-              })
-            }
-            className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text placeholder:text-brand-muted focus:outline-none focus:ring-1 focus:ring-brand-green"
-            placeholder="https://hooks.example.com/..."
-          />
+      </section>
+
+      {/* Display */}
+      <section className="bg-brand-surface border border-brand-border rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold">Display</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-brand-muted mb-1">
+              Timezone
+            </label>
+            <select
+              value={settings.display.timezone}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  display: { ...settings.display, timezone: e.target.value },
+                })
+              }
+              className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text focus:outline-none focus:ring-1 focus:ring-brand-green"
+            >
+              <option value="UTC">UTC</option>
+              <option value="America/New_York">New York</option>
+              <option value="America/Chicago">Chicago</option>
+              <option value="America/Los_Angeles">Los Angeles</option>
+              <option value="Europe/London">London</option>
+              <option value="Europe/Berlin">Berlin</option>
+              <option value="Asia/Tokyo">Tokyo</option>
+              <option value="Asia/Shanghai">Shanghai</option>
+              <option value="Asia/Hong_Kong">Hong Kong</option>
+              <option value="Asia/Singapore">Singapore</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-brand-muted mb-1">
+              Currency
+            </label>
+            <select
+              value={settings.display.currency}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  display: { ...settings.display, currency: e.target.value },
+                })
+              }
+              className="w-full bg-brand-bg border border-brand-border rounded-md px-3 py-2 text-sm text-brand-text focus:outline-none focus:ring-1 focus:ring-brand-green"
+            >
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="JPY">JPY</option>
+              <option value="BTC">BTC</option>
+            </select>
+          </div>
         </div>
       </section>
     </div>

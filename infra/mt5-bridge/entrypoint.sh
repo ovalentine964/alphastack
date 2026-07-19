@@ -1,17 +1,26 @@
 #!/bin/bash
+# =============================================================================
+# AlphaStack MT5 Bridge — Entrypoint
+# =============================================================================
+# Starts: Xvfb (virtual display) + x11vnc (VNC) + noVNC (web) + MT5 + Bridge
+# =============================================================================
 set -e
 
 export WINEPREFIX="${WINEPREFIX:-/config/.wine}"
 export MT5_PORT="${MT5_PORT:-8001}"
-export API_PORT="${API_PORT:-8000}"
+export API_PORT="${API_PORT:-8080}"
 export VNC_PORT="${VNC_PORT:-3000}"
 export VNC_PASSWORD="${VNC_PASSWORD:-changeme}"
 
-echo "=== MT5 Docker API + AlphaStack Bridge Starting ==="
+echo "=== AlphaStack MT5 Bridge v1.1.0 ==="
+echo "  API_PORT=${API_PORT}"
+echo "  VNC_PORT=${VNC_PORT}"
+echo "  WINEPREFIX=${WINEPREFIX}"
 
 mkdir -p "${WINEPREFIX}" /var/log/supervisor
 
-cat > /etc/supervisor/conf.d/supervisord.conf << 'EOF'
+# Generate supervisor config
+cat > /etc/supervisor/conf.d/supervisord.conf << SUPEREOF
 [supervisord]
 nodaemon=true
 user=root
@@ -42,14 +51,6 @@ environment=DISPLAY=":1",PYTHONUNBUFFERED="1"
 stdout_logfile=/var/log/supervisor/mt5.log
 stderr_logfile=/var/log/supervisor/mt5.err
 
-[program:api]
-command=python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port %(ENV_API_PORT)s
-directory=/app
-autorestart=true
-environment=PYTHONUNBUFFERED="1"
-stdout_logfile=/var/log/supervisor/api.log
-stderr_logfile=/var/log/supervisor/api.err
-
 [program:bridge]
 command=python3 /app/bridge_api.py
 directory=/app
@@ -57,7 +58,7 @@ autorestart=true
 environment=DISPLAY=":1",PYTHONUNBUFFERED="1",WINEPREFIX="/config/.wine"
 stdout_logfile=/var/log/supervisor/bridge.log
 stderr_logfile=/var/log/supervisor/bridge.err
-EOF
+SUPEREOF
 
-echo "Starting supervisor..."
+echo "Starting supervisord..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf

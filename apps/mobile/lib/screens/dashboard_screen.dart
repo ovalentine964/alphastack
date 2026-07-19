@@ -10,6 +10,7 @@ import '../widgets/position_tile.dart';
 import '../widgets/signal_card.dart';
 import '../models/trade.dart';
 import '../models/signal.dart';
+import '../models/agent_status.dart';
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
@@ -33,6 +34,11 @@ final testnetModeProvider = FutureProvider<bool>((ref) async {
   return await ApiService().isTestnet();
 });
 
+/// Orchestrator health for the dashboard summary.
+final dashAgentHealthProvider = FutureProvider<AgentPipelineStatus>((ref) async {
+  return await ApiService().getOrchestratorHealth();
+});
+
 // ─── Dashboard Screen ────────────────────────────────────────────────────────
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -47,23 +53,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   StreamSubscription? _wsStateSub;
   StreamSubscription? _tradeSub;
   StreamSubscription? _signalSub;
+  StreamSubscription? _agentSub;
 
   @override
   void initState() {
     super.initState();
-    // Connect WebSocket for real-time updates
     _connectWebSocket();
   }
 
   Future<void> _connectWebSocket() async {
-    // Only connect if we have auth token
-    final api = ApiService();
-    final keys = await api.getStoredApiKeys();
-    if (keys['binanceApiKey'] == null) return;
-
     await _ws.connect();
 
-    // Listen for trade updates → refresh trades/positions
     _tradeSub = _ws.tradeUpdates.listen((_) {
       if (mounted) {
         ref.invalidate(positionsProvider);
@@ -71,10 +71,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       }
     });
 
-    // Listen for signal updates → refresh signals
     _signalSub = _ws.signalUpdates.listen((_) {
       if (mounted) {
         ref.invalidate(recentSignalsProvider);
+      }
+    });
+
+    _agentSub = _ws.agentStatusUpdates.listen((_) {
+      if (mounted) {
+        ref.invalidate(dashAgentHealthProvider);
       }
     });
   }
@@ -84,6 +89,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     _wsStateSub?.cancel();
     _tradeSub?.cancel();
     _signalSub?.cancel();
+    _agentSub?.cancel();
     super.dispose();
   }
 
@@ -93,6 +99,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final positions = ref.watch(positionsProvider);
     final signals = ref.watch(recentSignalsProvider);
     final testnet = ref.watch(testnetModeProvider);
+    final agentHealth = ref.watch(dashAgentHealthProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -163,6 +170,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ref.invalidate(positionsProvider);
           ref.invalidate(recentSignalsProvider);
           ref.invalidate(testnetModeProvider);
+          ref.invalidate(dashAgentHealthProvider);
           ApiService().clearCache();
         },
         color: AlphaStackApp.accentBlue,
@@ -173,6 +181,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             const _ConnectionBanner(),
             // Offline banner
             if (ApiService().isOffline) _buildOfflineBanner(),
+
+            // Agent Pipeline Status
+            agentHealth.when(
+              data: (data) => _buildAgentStatusSummary(data),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            if (agentHealth.valueOrNull != null) const SizedBox(height: 16),
 
             // Portfolio Card
             portfolio.when(
@@ -245,16 +261,66 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
+  Widget _buildAgentStatusSummary(AgentPipelineStatus status) {
+    Color color;
+    IconData icon;
+    String label;
+
+    if (status.allHealthy) {
+      color = AlphaStackApp.accentGreen;
+      icon = Icons.check_circle_rounded;
+      label = 'Pipeline Healthy — ${status.agents.length} agents running';
+    } else if (status.anyDead) {
+      color = AlphaStackApp.accentRed;
+      icon = Icons.error_rounded;
+      label = 'Pipeline Issue — agent(s) unreachable';
+    } else {
+      color = AlphaStackApp.accentOrange;
+      icon = Icons.warning_rounded;
+      label = 'Pipeline Degraded — some agents struggling';
+    }
+
+    return GestureDetector(
+      onTap: () {
+        // Navigate to Agent Status tab (index 5)
+        ref.read(currentTabProvider.notifier).state = 5;
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withAlpha(15),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withAlpha(60)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: color.withAlpha(150), size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPortfolioFromApi(Map<String, dynamic> data) {
-    // Server PnL response has different field names than the old mock
     final totalUnrealized =
         (data['total_unrealized_pnl'] as num?)?.toDouble() ?? 0;
     final totalPnl = (data['total_pnl'] as num?)?.toDouble() ?? 0;
     final todayPnl = (data['today_pnl'] as num?)?.toDouble() ?? 0;
     final totalTrades = (data['total_trades'] as num?)?.toInt() ?? 0;
+    final winRate = (data['win_rate'] as num?)?.toDouble() ?? 0;
 
-    // Estimate balance from PnL (server doesn't provide balance directly)
-    // In a real app, this would come from the broker API
     const baseBalance = 100000.0;
     final totalBalance = baseBalance + totalPnl;
     final totalEquity = totalBalance + totalUnrealized;
@@ -367,6 +433,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ref.invalidate(portfolioProvider);
               ref.invalidate(positionsProvider);
               ref.invalidate(recentSignalsProvider);
+              ref.invalidate(dashAgentHealthProvider);
             },
             icon: const Icon(Icons.refresh, size: 16),
             label: const Text('Retry'),
@@ -698,6 +765,7 @@ class _RefreshButton extends ConsumerWidget {
         ref.invalidate(positionsProvider);
         ref.invalidate(recentSignalsProvider);
         ref.invalidate(testnetModeProvider);
+        ref.invalidate(dashAgentHealthProvider);
         ApiService().clearCache();
       },
     );

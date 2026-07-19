@@ -9,6 +9,7 @@ import {
   Radio,
   BarChart3,
   Settings,
+  Zap,
 } from "lucide-react";
 
 const nav = [
@@ -23,32 +24,45 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-56 bg-brand-surface border-r border-brand-border flex flex-col">
+    <aside className="w-56 bg-brand-surface border-r border-brand-border flex flex-col shrink-0">
       <div className="p-4 border-b border-brand-border">
-        <h1 className="text-xl font-bold text-brand-green tracking-wider">
-          ⚡ AlphaStack
-        </h1>
-        <p className="text-xs text-brand-muted mt-1">Trading Dashboard</p>
+        <div className="flex items-center gap-2">
+          <Zap size={20} className="text-brand-green" />
+          <div>
+            <h1 className="text-xl font-bold text-brand-green tracking-wider">
+              AlphaStack
+            </h1>
+            <p className="text-xs text-brand-muted">Trading Dashboard</p>
+          </div>
+        </div>
       </div>
       <nav className="flex-1 p-2 space-y-1">
-        {nav.map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className={clsx(
-              "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-              pathname === href
-                ? "bg-brand-green/10 text-brand-green"
-                : "text-brand-muted hover:text-brand-text hover:bg-brand-border/30"
-            )}
-          >
-            <Icon size={18} />
-            {label}
-          </Link>
-        ))}
+        {nav.map(({ href, label, icon: Icon }) => {
+          const isActive =
+            href === "/" ? pathname === "/" : pathname.startsWith(href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={clsx(
+                "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                isActive
+                  ? "bg-brand-green/10 text-brand-green"
+                  : "text-brand-muted hover:text-brand-text hover:bg-brand-border/30"
+              )}
+            >
+              <Icon size={18} />
+              {label}
+            </Link>
+          );
+        })}
       </nav>
-      <div className="p-4 border-t border-brand-border text-xs text-brand-muted">
-        v0.1.0
+      <div className="p-4 border-t border-brand-border">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-brand-green animate-pulse-green" />
+          <span className="text-xs text-brand-muted">System Online</span>
+        </div>
+        <p className="text-xs text-brand-muted/50 mt-1">v0.2.0</p>
       </div>
     </aside>
   );

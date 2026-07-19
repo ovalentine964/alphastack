@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/trade.dart';
 import '../models/signal.dart';
+import '../models/agent_status.dart';
 
 // ─── Exceptions ──────────────────────────────────────────────────────────────
 
@@ -90,6 +91,16 @@ class ApiService {
   Future<void> setBaseUrl(String url) async {
     _baseUrl = url;
     await _storage.write(key: _baseUrlKey, value: url);
+  }
+
+  /// Derive the base origin (without /api/v1) for system endpoints.
+  Future<String> get _baseOrigin async {
+    final base = await baseUrl;
+    // Strip /api/v1 suffix if present
+    if (base.endsWith('/api/v1')) {
+      return base.substring(0, base.length - 7);
+    }
+    return base;
   }
 
   // ── Auth Token ─────────────────────────────────────────────────────
@@ -225,9 +236,10 @@ class ApiService {
     Map<String, String>? queryParams,
     bool useCache = true,
     Duration? cacheTtl,
+    bool useBaseOrigin = false,
   }) async {
-    final base = await baseUrl;
-    final uri = Uri.parse('$base/$endpoint').replace(queryParameters: queryParams);
+    final host = useBaseOrigin ? await _baseOrigin : await baseUrl;
+    final uri = Uri.parse('$host/$endpoint').replace(queryParameters: queryParams);
     final cacheKey = uri.toString();
 
     // Return cached data if valid
@@ -359,6 +371,56 @@ class ApiService {
     return null;
   }
 
+  Future<dynamic> _put(String endpoint, {Map<String, dynamic>? body}) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/$endpoint');
+    final headers = await _headers();
+
+    for (int attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        final response = await http
+            .put(uri, headers: headers, body: jsonEncode(body ?? {}))
+            .timeout(_requestTimeout);
+
+        final result = _handleResponse(response);
+        _setOffline(false);
+        return result;
+      } on TimeoutException {
+        if (attempt == _maxRetries) {
+          _setOffline(true);
+          throw ApiException('Request timed out', isNetworkError: true);
+        }
+      } on http.ClientException {
+        if (attempt == _maxRetries) {
+          _setOffline(true);
+          throw ApiException('Network error', isNetworkError: true);
+        }
+      } on ApiException catch (e) {
+        if (e.statusCode == 401 && attempt == 0) {
+          final refreshed = await _tryRefreshToken();
+          if (refreshed) {
+            final newHeaders = await _headers();
+            try {
+              final response = await http
+                  .put(uri, headers: newHeaders, body: jsonEncode(body ?? {}))
+                  .timeout(_requestTimeout);
+              final result = _handleResponse(response);
+              _setOffline(false);
+              return result;
+            } catch (_) {}
+          }
+        }
+        if (attempt == _maxRetries) rethrow;
+      }
+
+      if (attempt < _maxRetries) {
+        await Future.delayed(_baseRetryDelay * (1 << attempt));
+      }
+    }
+
+    return null;
+  }
+
   dynamic _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return null;
@@ -405,15 +467,24 @@ class ApiService {
     return data.map((e) => Position.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  Future<Map<String, dynamic>> getPerformanceMetrics() async {
+    final data = await _get('portfolio/performance', cacheTtl: const Duration(minutes: 5));
+    return data as Map<String, dynamic>;
+  }
+
   // ─── Trades ──────────────────────────────────────────────────────
 
-  Future<List<Trade>> getTrades({int page = 1, int limit = 50}) async {
+  Future<List<Trade>> getTrades({int page = 1, int limit = 50, String? statusFilter}) async {
+    final queryParams = <String, String>{
+      'page': page.toString(),
+      'page_size': limit.toString(),
+    };
+    if (statusFilter != null) {
+      queryParams['status'] = statusFilter;
+    }
     final data = await _get(
       'trades',
-      queryParams: {
-        'page': page.toString(),
-        'page_size': limit.toString(),
-      },
+      queryParams: queryParams,
       cacheTtl: const Duration(minutes: 2),
     );
     final items = (data['trades'] ?? data) as List;
@@ -425,21 +496,45 @@ class ApiService {
     return Trade.fromJson(data);
   }
 
+  Future<Trade> createTrade(TradeCreate trade) async {
+    final data = await _post('trades', body: trade.toJson());
+    return Trade.fromJson(data);
+  }
+
+  Future<Trade> closeTrade(String tradeId, {double? exitPrice}) async {
+    final queryParams = exitPrice != null ? {'exit_price': exitPrice.toString()} : null;
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/trades/$tradeId/close').replace(queryParameters: queryParams);
+    final headers = await _headers();
+    final response = await http.put(uri, headers: headers).timeout(_requestTimeout);
+    final result = _handleResponse(response);
+    return Trade.fromJson(result);
+  }
+
   // ─── Signals ─────────────────────────────────────────────────────
 
-  Future<List<Signal>> getActiveSignals() async {
-    final data = await _get('signals', cacheTtl: const Duration(minutes: 1));
+  Future<List<Signal>> getActiveSignals({String? symbol, String? strategyId}) async {
+    final queryParams = <String, String>{};
+    if (symbol != null) queryParams['symbol'] = symbol;
+    if (strategyId != null) queryParams['strategy_id'] = strategyId;
+    final data = await _get(
+      'signals',
+      queryParams: queryParams.isNotEmpty ? queryParams : null,
+      cacheTtl: const Duration(minutes: 1),
+    );
     final items = (data['signals'] ?? data) as List;
     return items.map((e) => Signal.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<List<Signal>> getSignals({int page = 1, int limit = 50}) async {
+  Future<List<Signal>> getSignals({int page = 1, int limit = 50, String? symbol}) async {
+    final queryParams = <String, String>{
+      'page': page.toString(),
+      'page_size': limit.toString(),
+    };
+    if (symbol != null) queryParams['symbol'] = symbol;
     final data = await _get(
       'signals/history',
-      queryParams: {
-        'page': page.toString(),
-        'page_size': limit.toString(),
-      },
+      queryParams: queryParams,
       cacheTtl: const Duration(minutes: 2),
     );
     final items = (data['signals'] ?? data) as List;
@@ -479,6 +574,55 @@ class ApiService {
     return data as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> getEquityCurve({int days = 90}) async {
+    final data = await _get(
+      'analytics/equity-curve',
+      queryParams: {'days': days.toString()},
+      cacheTtl: const Duration(minutes: 5),
+    );
+    return data as Map<String, dynamic>;
+  }
+
+  // ─── Agent / Orchestrator Status ──────────────────────────────────
+
+  Future<AgentPipelineStatus> getOrchestratorHealth() async {
+    final data = await _get(
+      'orchestrator/health',
+      useBaseOrigin: true,
+      useCache: false,
+    );
+    return AgentPipelineStatus.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> getSystemStatus() async {
+    final data = await _get(
+      'status',
+      useBaseOrigin: true,
+      useCache: false,
+    );
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> triggerPipelineRun({
+    String symbol = 'BTC/USDT',
+    String timeframe = '1h',
+  }) async {
+    final base = await _baseOrigin;
+    final uri = Uri.parse('$base/orchestrator/run');
+    final headers = await _headers();
+    final response = await http
+        .post(
+          uri,
+          headers: headers,
+          body: jsonEncode({
+            'symbol': symbol,
+            'timeframe': timeframe,
+          }),
+        )
+        .timeout(const Duration(seconds: 60));
+    return _handleResponse(response) as Map<String, dynamic>;
+  }
+
   // ─── Auth ────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> authenticate({
@@ -503,14 +647,11 @@ class ApiService {
   }
 
   /// Auto-authenticate using stored keys, or demo credentials if none stored.
-  /// Tries: (1) stored keys → regular login, (2) demo endpoint → read-only token.
-  /// Returns true if authentication succeeded.
   Future<bool> autoAuthenticate() async {
     try {
       final apiKey = await getBinanceApiKey();
       final apiSecret = await getBinanceApiSecret();
 
-      // If we have stored keys, try regular login first
       if (apiKey != null && apiKey.isNotEmpty &&
           apiSecret != null && apiSecret.isNotEmpty) {
         try {
@@ -521,7 +662,6 @@ class ApiService {
         }
       }
 
-      // Try demo endpoint (works without admin credentials)
       return await _demoAuthenticate();
     } catch (e) {
       debugPrint('Auto-authenticate failed: $e');
@@ -529,7 +669,6 @@ class ApiService {
     }
   }
 
-  /// Authenticate via the demo endpoint (no credentials required).
   Future<bool> _demoAuthenticate() async {
     try {
       final base = await baseUrl;
@@ -556,8 +695,8 @@ class ApiService {
 
   Future<bool> checkHealth() async {
     try {
-      final base = await baseUrl;
-      final uri = Uri.parse('$base/../health');
+      final origin = await _baseOrigin;
+      final uri = Uri.parse('$origin/health');
       final response = await http.get(uri).timeout(_healthTimeout);
       final healthy = response.statusCode == 200;
       _setOffline(!healthy);

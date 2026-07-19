@@ -5,6 +5,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/trades_screen.dart';
 import 'screens/signals_screen.dart';
 import 'screens/analytics_screen.dart';
+import 'screens/agent_status_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/api_service.dart';
 import 'providers/connection_status.dart';
@@ -488,6 +489,7 @@ class MainNavigation extends ConsumerWidget {
       SignalsScreen(),
       AnalyticsScreen(),
       SettingsScreen(),
+      AgentStatusScreen(),
     ];
 
     return Scaffold(
@@ -523,6 +525,11 @@ class MainNavigation extends ConsumerWidget {
             icon: Icon(Icons.settings_rounded),
             activeIcon: Icon(Icons.settings_rounded),
             label: 'Settings',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.hub_rounded),
+            activeIcon: Icon(Icons.hub_rounded),
+            label: 'Pipeline',
           ),
         ],
       ),

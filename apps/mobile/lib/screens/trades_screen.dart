@@ -324,20 +324,20 @@ class _SideChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLong = side == TradeSide.long;
+    final isBuy = side == TradeSide.buy || side == TradeSide.long;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
-        color: (isLong ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed)
+        color: (isBuy ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed)
             .withAlpha(25),
         borderRadius: BorderRadius.circular(3),
       ),
       child: Text(
-        isLong ? 'L' : 'S',
+        isBuy ? 'B' : 'S',
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: isLong ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed,
+          color: isBuy ? AlphaStackApp.accentGreen : AlphaStackApp.accentRed,
         ),
       ),
     );

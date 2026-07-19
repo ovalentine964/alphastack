@@ -14,6 +14,10 @@ final signalsListProvider = FutureProvider<List<Signal>>((ref) async {
   return await ApiService().getActiveSignals();
 });
 
+final signalHistoryProvider = FutureProvider<List<Signal>>((ref) async {
+  return await ApiService().getSignals();
+});
+
 // Filter state
 enum SignalDirectionFilter { all, buy, sell }
 enum ConfidenceFilter { all, high, medium, low }

@@ -1,8 +1,8 @@
 # =============================================================================
-# AlphaStack – Default Configuration
+# AlphaStack — Configuration (v1.1)
 # =============================================================================
-# This file is loaded at startup and can be overridden by environment variables.
-# Environment variable format: ALPHASTACK_<SECTION>_<KEY> (uppercased)
+# Loaded at startup.  Override any value via environment variable:
+#   ALPHASTACK_<SECTION>_<KEY>  (uppercased)
 # Example: ALPHASTACK_DB_HOST=10.0.0.5
 # =============================================================================
 
@@ -12,18 +12,18 @@
 env: dev
 
 # -----------------------------------------------------------------------------
-# Database (PostgreSQL)
+# Database (PostgreSQL / TimescaleDB)
 # -----------------------------------------------------------------------------
 db:
   host: localhost
   port: 5432
   name: alphastack
   user: alphastack
-  password: alphastack          # Override via DB_PASSWORD env var
-  pool_size: 20                 # Connection pool size
-  max_overflow: 10              # Extra connections beyond pool_size
-  pool_timeout: 30              # Seconds to wait for a connection
-  echo: false                   # Log all SQL (noisy – dev only)
+  password: alphastack          # Override via DB_PASSWORD
+  pool_size: 20
+  max_overflow: 10
+  pool_timeout: 30
+  echo: false                   # Log all SQL (dev only)
 
 # -----------------------------------------------------------------------------
 # Redis
@@ -32,31 +32,44 @@ redis:
   host: localhost
   port: 6379
   db: 0
-  password: null                # Override via REDIS_PASSWORD env var
+  password: null                # Override via REDIS_PASSWORD
   ssl: false
   pool_size: 20
-  stream_max_len: 100000        # Max entries per stream (approximate)
-  cache_default_ttl: 300        # Default cache TTL in seconds
+  stream_max_len: 100000        # Max entries per stream
+  cache_default_ttl: 300        # Default cache TTL (seconds)
 
 # -----------------------------------------------------------------------------
-# Broker – MetaTrader 5
+# Broker Registry — MetaTrader 5 (via Docker bridge)
 # -----------------------------------------------------------------------------
 mt5:
-  login: 0                      # MT5 account login number
-  password: ""                  # Override via MT5_PASSWORD env var
+  login: 0                      # Override via MT5_LOGIN
+  password: ""                  # Override via MT5_PASSWORD
   server: ""                    # e.g. "MetaQuotes-Demo"
   path: ""                      # Path to terminal64.exe (auto-detect if empty)
-  timeout: 60000                # Connection timeout in ms
+  timeout: 60000                # Connection timeout (ms)
+  bridge_url: ""                # Override via MT5_BRIDGE_URL (e.g. http://mt5-bridge:8080)
+  magic_number: 20260713        # Must match EA magic
+  max_slippage_points: 10       # Max deviation in points
 
 # -----------------------------------------------------------------------------
-# Broker – OANDA (Forex)
+# Broker — OANDA (Forex)
 # -----------------------------------------------------------------------------
 oanda:
-  api_token: ""                 # Override via OANDA_API_TOKEN env var
-  account_id: ""                 # Override via OANDA_ACCOUNT_ID env var
-  environment: practice          # practice | live  (override via OANDA_ENV)
+  api_token: ""                 # Override via OANDA_API_TOKEN
+  account_id: ""                # Override via OANDA_ACCOUNT_ID
+  environment: practice         # practice | live
   max_retries: 3
   timeout_seconds: 15
+
+# -----------------------------------------------------------------------------
+# Broker — CCXT (Crypto exchanges)
+# -----------------------------------------------------------------------------
+ccxt:
+  exchange: binance             # Default exchange
+  api_key: ""                   # Override via CCXT_API_KEY
+  secret: ""                    # Override via CCXT_SECRET
+  passphrase: null              # Some exchanges require passphrase
+  sandbox: false                # Use exchange sandbox/testnet
 
 # -----------------------------------------------------------------------------
 # Forex Configuration
@@ -74,34 +87,24 @@ forex:
     - EUR/GBP
     - EUR/JPY
     - GBP/JPY
-  risk_pct: 0.01                  # 1% risk per forex trade
-  min_confluence: 0.4             # Higher confluence threshold for forex
-  session_filter: true            # Only trade during liquid sessions (London/NY)
-  max_spread_pips: 5.0            # Skip trades if spread exceeds this
-  default_stop_pips: 20.0         # Default stop loss in pips if none specified
+  risk_pct: 0.01                # 1% risk per forex trade
+  min_confluence: 40            # Min confluence score (0-100) to generate signal
+  session_filter: true          # Only trade London/NY sessions
+  max_spread_pips: 5.0          # Skip trades if spread exceeds
+  default_stop_pips: 20.0       # Default SL in pips if none specified
   lot_sizing:
-    mode: risk_based              # risk_based | fixed
-    fixed_lots: 0.1               # Used when mode=fixed
-    max_lots: 10.0                # Hard cap on position size
-    min_lots: 0.01                # Minimum position size (micro lot)
-
-# -----------------------------------------------------------------------------
-# Broker – CCXT (crypto exchanges)
-# -----------------------------------------------------------------------------
-ccxt:
-  exchange: binance             # Default exchange
-  api_key: ""                   # Override via CCXT_API_KEY env var
-  secret: ""                    # Override via CCXT_SECRET env var
-  passphrase: null              # Some exchanges require a passphrase
-  sandbox: false                # Use exchange sandbox/testnet
+    mode: risk_based            # risk_based | fixed
+    fixed_lots: 0.1             # Used when mode=fixed
+    max_lots: 10.0              # Hard cap
+    min_lots: 0.01              # Micro-lot minimum
 
 # -----------------------------------------------------------------------------
 # LLM / AI Configuration
 # -----------------------------------------------------------------------------
 llm:
-  openai_api_key: null          # Override via LLM_OPENAI_API_KEY env var
-  anthropic_api_key: null       # Override via LLM_ANTHROPIC_API_KEY env var
-  default_model: gpt-4o         # Default LLM model
+  openai_api_key: null          # Override via LLM_OPENAI_API_KEY
+  anthropic_api_key: null       # Override via LLM_ANTHROPIC_API_KEY
+  default_model: gpt-4o
   temperature: 0.1              # Low temp for deterministic outputs
   max_tokens: 4096
 
@@ -109,9 +112,9 @@ llm:
 # Market Data Feeds
 # -----------------------------------------------------------------------------
 feeds:
-  polygon_api_key: null         # Override via FEED_POLYGON_API_KEY env var
-  alpha_vantage_api_key: null   # Override via FEED_ALPHA_VANTAGE_API_KEY env var
-  finnhub_api_key: null         # Override via FEED_FINNHUB_API_KEY env var
+  polygon_api_key: null         # Override via FEED_POLYGON_API_KEY
+  alpha_vantage_api_key: null   # Override via FEED_ALPHA_VANTAGE_API_KEY
+  finnhub_api_key: null         # Override via FEED_FINNHUB_API_KEY
 
 # -----------------------------------------------------------------------------
 # Risk Management
@@ -127,6 +130,76 @@ risk:
   risk_free_rate: 0.05          # For Sharpe/Sortino calculations
 
 # -----------------------------------------------------------------------------
+# Agent Orchestrator (LangGraph multi-agent pipeline)
+# -----------------------------------------------------------------------------
+orchestrator:
+  # Pipeline stages — executed in order
+  stages:
+    - fundamental        # Step 01: VIX, news, macro bias
+    - market_bias        # Step 02: MA crossover, trend direction
+    - session            # Step 03: Session analysis (London/NY/Asian)
+    - structure          # Step 04: Market structure (HH/HL/LH/LL)
+    - sr_levels          # Step 05: Support/resistance detection
+    - liquidity          # Step 06: Liquidity pool detection
+    - smc                # Step 07: Smart money concepts (OB, FVG)
+    - rsi                # Step 08: RSI with regime-adaptive thresholds
+    - candlestick        # Step 09: Candlestick pattern recognition
+    - confluence         # Step 10: Confluence scoring engine
+    - sizing             # Step 11: Position sizing
+    - stop_loss          # Step 12: Stop loss placement
+    - take_profit        # Step 13: Take profit targets
+    - management         # Step 14: Trade management (BE, trailing)
+    - exit               # Step 15: Exit conditions
+
+  # Agent configuration
+  agents:
+    strategy:
+      enabled: true
+      model: gpt-4o
+      temperature: 0.1
+      max_retries: 2
+    risk:
+      enabled: true
+      model: gpt-4o
+      temperature: 0.0
+      max_retries: 3
+    execution:
+      enabled: true
+      broker_preference: ["mt5-bridge", "ccxt", "oanda"]
+      max_slippage_pips: 3.0
+      retry_on_reject: true
+    reflection:
+      enabled: true
+      model: gpt-4o
+      post_trade_analysis: true
+      pre_trade_validation: true
+    debate:
+      enabled: false             # Enable bull/bear debate for high-conviction trades
+      min_confluence_for_debate: 70
+    news:
+      enabled: true
+      model: gpt-4o
+      sentiment_weight: 0.05
+
+  # Human-in-the-loop
+  human_in_the_loop: false       # Auto-approve for API mode
+  approval_timeout_seconds: 300  # Timeout for manual approval
+
+# -----------------------------------------------------------------------------
+# Monitoring / Observability
+# -----------------------------------------------------------------------------
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+  grafana:
+    enabled: true
+    port: 3001
+  loki:
+    enabled: true
+    url: "http://loki:3100"
+
+# -----------------------------------------------------------------------------
 # API Server (FastAPI)
 # -----------------------------------------------------------------------------
 api:
@@ -134,17 +207,17 @@ api:
   port: 8000
   workers: 4
   cors_origins:
-    - http://localhost:3000      # Frontend dev server
+    - http://localhost:3000
   api_prefix: /api/v1
-  debug: false                  # Enable debug mode (noisy – dev only)
+  debug: false
 
 # -----------------------------------------------------------------------------
 # Logging
 # -----------------------------------------------------------------------------
 logging:
-  level: INFO                   # DEBUG | INFO | WARNING | ERROR | CRITICAL
-  json_output: true             # JSON lines (false = coloured console)
-  log_dir: logs                 # Directory for trade & app log files
+  level: INFO
+  json_output: true
+  log_dir: logs
 
 # -----------------------------------------------------------------------------
 # Symbols & Timeframes
@@ -158,6 +231,13 @@ trading:
     - EUR/USD
     - GBP/USD
     - USD/JPY
+    - AUD/USD
+    - USD/CHF
+    - NZD/USD
+    - USD/CAD
+    - EUR/GBP
+    - EUR/JPY
+    - GBP/JPY
   timeframes:
     - 1m
     - 5m

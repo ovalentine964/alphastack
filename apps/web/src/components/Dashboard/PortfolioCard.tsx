@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useTradeStore } from "@/stores/tradeStore";
-import { TrendingUp, TrendingDown, Wallet, DollarSign } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, DollarSign, BarChart3, Target } from "lucide-react";
 import { clsx } from "clsx";
 
 function Stat({
@@ -47,39 +47,71 @@ function fmt(n: number): string {
 }
 
 export function PortfolioCard() {
-  const { portfolio, fetchPortfolio } = useTradeStore();
+  const { pnl, positions, fetchPnl, fetchPositions } = useTradeStore();
 
   useEffect(() => {
-    fetchPortfolio();
-    const id = setInterval(fetchPortfolio, 10_000);
+    fetchPnl();
+    fetchPositions();
+    const id = setInterval(() => {
+      fetchPnl();
+      fetchPositions();
+    }, 10_000);
     return () => clearInterval(id);
-  }, [fetchPortfolio]);
+  }, [fetchPnl, fetchPositions]);
 
-  const pnlColor =
-    portfolio.dayPnl > 0 ? "green" : portfolio.dayPnl < 0 ? "red" : undefined;
+  // Compute portfolio value from positions
+  const totalValue = positions.reduce(
+    (sum, p) => sum + p.current_price * p.quantity,
+    0
+  );
+  const totalUnrealized = positions.reduce(
+    (sum, p) => sum + p.unrealized_pnl,
+    0
+  );
+
+  const todayPnl = pnl?.today_pnl ?? 0;
+  const totalPnl = pnl?.total_pnl ?? 0;
+  const winRate = pnl?.win_rate ?? 0;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
-        <Stat label="Balance" value={fmt(portfolio.balance)} icon={Wallet} />
-      </div>
-      <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
-        <Stat label="Equity" value={fmt(portfolio.equity)} icon={DollarSign} />
-      </div>
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
       <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
         <Stat
-          label="Day P&L"
-          value={fmt(portfolio.dayPnl)}
-          icon={portfolio.dayPnl >= 0 ? TrendingUp : TrendingDown}
-          color={pnlColor}
+          label="Positions Value"
+          value={fmt(totalValue)}
+          icon={Wallet}
         />
       </div>
       <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
         <Stat
-          label="Total Return"
-          value={`${portfolio.totalReturn >= 0 ? "+" : ""}${portfolio.totalReturn.toFixed(2)}%`}
-          icon={portfolio.totalReturn >= 0 ? TrendingUp : TrendingDown}
-          color={portfolio.totalReturn >= 0 ? "green" : "red"}
+          label="Unrealized P&L"
+          value={fmt(totalUnrealized)}
+          icon={totalUnrealized >= 0 ? TrendingUp : TrendingDown}
+          color={totalUnrealized >= 0 ? "green" : "red"}
+        />
+      </div>
+      <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
+        <Stat
+          label="Today P&L"
+          value={fmt(todayPnl)}
+          icon={todayPnl >= 0 ? TrendingUp : TrendingDown}
+          color={todayPnl >= 0 ? "green" : "red"}
+        />
+      </div>
+      <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
+        <Stat
+          label="Total P&L"
+          value={fmt(totalPnl)}
+          icon={DollarSign}
+          color={totalPnl >= 0 ? "green" : "red"}
+        />
+      </div>
+      <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
+        <Stat
+          label="Win Rate"
+          value={`${winRate.toFixed(1)}%`}
+          icon={Target}
+          color={winRate >= 50 ? "green" : "red"}
         />
       </div>
     </div>

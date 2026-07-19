@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { Store } from "@tauri-apps/plugin-store";
 
@@ -17,7 +17,7 @@ export const tauriBridge = {
    */
   async sendNotification(title: string, body: string): Promise<void> {
     try {
-      sendNotification({ title, body });
+      await sendNotification({ title, body });
     } catch (err) {
       console.error("Notification failed:", err);
       // Fallback: use Tauri command
@@ -82,33 +82,34 @@ export const tauriBridge = {
    * Open an external URL in the default browser.
    */
   async openUrl(url: string): Promise<void> {
-    const { open } = await import("@tauri-apps/api/shell");
-    await open(url);
+    const { openUrl } = await import("@tauri-apps/plugin-shell");
+    await openUrl(url);
   },
 
   /**
    * Minimize the window.
    */
   async minimizeWindow(): Promise<void> {
-    const { appWindow } = await import("@tauri-apps/api/window");
-    await appWindow.minimize();
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().minimize();
   },
 
   /**
    * Toggle fullscreen.
    */
   async toggleFullscreen(): Promise<void> {
-    const { appWindow } = await import("@tauri-apps/api/window");
-    const isFullscreen = await appWindow.isFullscreen();
-    await appWindow.setFullscreen(!isFullscreen);
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    const isFullscreen = await win.isFullscreen();
+    await win.setFullscreen(!isFullscreen);
   },
 
   /**
    * Close the window (hides to tray).
    */
   async closeToTray(): Promise<void> {
-    const { appWindow } = await import("@tauri-apps/api/window");
-    await appWindow.hide();
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().hide();
   },
 
   // ── Secure storage helpers ───────────────────────────────────

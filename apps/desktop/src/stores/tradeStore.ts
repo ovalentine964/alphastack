@@ -1,69 +1,77 @@
 import { create } from "zustand";
 import { api } from "../lib/api";
 import { wsClient } from "../lib/websocket";
-import type { Portfolio, Position, Trade } from "../lib/types";
+import type {
+  Trade,
+  PortfolioPosition,
+  PortfolioSummary,
+} from "../lib/types";
 
 interface TradeState {
-  portfolio: Portfolio;
-  positions: Position[];
+  positions: PortfolioPosition[];
+  portfolioSummary: PortfolioSummary | null;
   trades: Trade[];
   loading: boolean;
   error: string | null;
 
   fetchPortfolio: () => Promise<void>;
-  fetchPositions: () => Promise<void>;
-  fetchTrades: (limit?: number) => Promise<void>;
+  fetchPortfolioSummary: () => Promise<void>;
+  fetchTrades: (params?: {
+    page?: number;
+    status?: string;
+    symbol?: string;
+  }) => Promise<void>;
   fetchAll: () => Promise<void>;
+  createTrade: (data: {
+    symbol: string;
+    side: string;
+    quantity: number;
+    price?: number;
+    stop_loss?: number;
+    take_profit?: number;
+    strategy_id?: string;
+    notes?: string;
+  }) => Promise<Trade>;
+  closeTrade: (tradeId: string, exitPrice?: number) => Promise<Trade>;
 
   // WebSocket-driven mutations
-  updatePosition: (pos: Position) => void;
-  addPosition: (pos: Position) => void;
-  removePosition: (id: string) => void;
+  updatePosition: (symbol: string, data: Partial<PortfolioPosition>) => void;
   addTrade: (trade: Trade) => void;
-  updatePortfolio: (p: Portfolio) => void;
+  updateTrade: (trade: Trade) => void;
 
   // WS subscription setup
   subscribeToUpdates: () => () => void;
 }
 
-const defaultPortfolio: Portfolio = {
-  balance: 0,
-  equity: 0,
-  unrealizedPnl: 0,
-  realizedPnl: 0,
-  dayPnl: 0,
-  totalReturn: 0,
-};
-
 export const useTradeStore = create<TradeState>((set, get) => ({
-  portfolio: defaultPortfolio,
   positions: [],
+  portfolioSummary: null,
   trades: [],
   loading: false,
   error: null,
 
   fetchPortfolio: async () => {
     try {
-      const portfolio = await api.getPortfolio();
-      set({ portfolio, error: null });
-    } catch (e) {
-      set({ error: (e as Error).message });
-    }
-  },
-
-  fetchPositions: async () => {
-    try {
-      const positions = await api.getPositions();
+      const positions = await api.getPortfolio();
       set({ positions, error: null });
     } catch (e) {
       set({ error: (e as Error).message });
     }
   },
 
-  fetchTrades: async (limit = 100) => {
+  fetchPortfolioSummary: async () => {
     try {
-      const trades = await api.getTrades(limit);
-      set({ trades, error: null });
+      const summary = await api.getPortfolioSummary();
+      set({ portfolioSummary: summary, error: null });
+    } catch (e) {
+      set({ error: (e as Error).message });
+    }
+  },
+
+  fetchTrades: async (params) => {
+    try {
+      const result = await api.getTrades(params);
+      set({ trades: result.trades, error: null });
     } catch (e) {
       set({ error: (e as Error).message });
     }
@@ -74,7 +82,7 @@ export const useTradeStore = create<TradeState>((set, get) => ({
     try {
       await Promise.allSettled([
         get().fetchPortfolio(),
-        get().fetchPositions(),
+        get().fetchPortfolioSummary(),
         get().fetchTrades(),
       ]);
     } finally {
@@ -82,19 +90,28 @@ export const useTradeStore = create<TradeState>((set, get) => ({
     }
   },
 
-  updatePosition: (pos) =>
-    set((s) => ({
-      positions: s.positions.map((p) => (p.id === pos.id ? pos : p)),
-    })),
+  createTrade: async (data) => {
+    const trade = await api.createTrade(data);
+    set((s) => ({ trades: [trade, ...s.trades] }));
+    return trade;
+  },
 
-  addPosition: (pos) =>
+  closeTrade: async (tradeId, exitPrice) => {
+    const trade = await api.closeTrade(tradeId, exitPrice);
     set((s) => ({
-      positions: [...s.positions, pos],
-    })),
+      trades: s.trades.map((t) => (t.id === tradeId ? trade : t)),
+    }));
+    // Refresh portfolio after closing
+    get().fetchPortfolio().catch(() => {});
+    get().fetchPortfolioSummary().catch(() => {});
+    return trade;
+  },
 
-  removePosition: (id) =>
+  updatePosition: (symbol, data) =>
     set((s) => ({
-      positions: s.positions.filter((p) => p.id !== id),
+      positions: s.positions.map((p) =>
+        p.symbol === symbol ? { ...p, ...data } : p
+      ),
     })),
 
   addTrade: (trade) =>
@@ -102,41 +119,38 @@ export const useTradeStore = create<TradeState>((set, get) => ({
       trades: [trade, ...s.trades].slice(0, 200),
     })),
 
-  updatePortfolio: (p) => set({ portfolio: p }),
+  updateTrade: (trade) =>
+    set((s) => ({
+      trades: s.trades.map((t) => (t.id === trade.id ? trade : t)),
+    })),
 
   subscribeToUpdates: () => {
-    const unsub = wsClient.subscribe((msg) => {
-      if (!msg.channel && !msg.type) return;
+    // Typed listeners
+    const unsubTrade = wsClient.onTrade((trade) => {
+      get().addTrade(trade);
+    });
 
+    // Generic listener for portfolio updates
+    const unsubGeneric = wsClient.subscribe((msg) => {
       switch (msg.type) {
-        case "position_update":
-          if (msg.data) get().updatePosition(msg.data as Position);
-          break;
-        case "position_opened":
-          if (msg.data) get().addPosition(msg.data as Position);
-          break;
-        case "position_closed":
-          if (msg.data) get().removePosition((msg.data as Position).id);
+        case "portfolio_update":
+          if (msg.data) {
+            const data = msg.data as Record<string, unknown>;
+            if (Array.isArray(data.positions)) {
+              set({ positions: data.positions as PortfolioPosition[] });
+            }
+          }
           break;
         case "trade_executed":
         case "trade_updated":
           if (msg.data) get().addTrade(msg.data as Trade);
           break;
-        case "portfolio_update":
-          if (msg.data) get().updatePortfolio(msg.data as Portfolio);
-          break;
-      }
-
-      // Also handle channel-based messages
-      switch (msg.channel) {
-        case "trades":
-          if (msg.data) get().addTrade(msg.data as Trade);
-          break;
-        case "portfolio":
-          if (msg.data) get().updatePortfolio(msg.data as Portfolio);
-          break;
       }
     });
-    return unsub;
+
+    return () => {
+      unsubTrade();
+      unsubGeneric();
+    };
   },
 }));

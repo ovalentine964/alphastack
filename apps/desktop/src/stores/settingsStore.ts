@@ -2,71 +2,106 @@ import { create } from "zustand";
 import { tauriBridge } from "../lib/tauri-bridge";
 import { api } from "../lib/api";
 import { wsClient } from "../lib/websocket";
-import type { AppSettings } from "../lib/types";
+import type { AppSettings, HealthResponse } from "../lib/types";
 
 interface SettingsState {
   settings: AppSettings;
+  connectionInfo: {
+    apiEndpoint: string;
+    wsEndpoint: string;
+  };
   loaded: boolean;
   saving: boolean;
   saved: boolean;
 
   loadSettings: () => Promise<void>;
   saveSettings: (updates: Partial<AppSettings>) => Promise<void>;
-  testConnection: () => Promise<{ ok: boolean; message: string }>;
+  testConnection: () => Promise<{ ok: boolean; message: string; health?: HealthResponse }>;
+  setEndpoints: (api: string, ws: string) => void;
 }
 
 const defaults: AppSettings = {
-  apiEndpoint: "http://localhost:8000/api/v1",
-  wsEndpoint: "ws://localhost:8000/ws",
-  binanceApiKey: "",
-  binanceApiSecret: "",
-  useTestnet: true,
-  mimoApiKey: "",
-  maxPositionSize: 1000,
-  maxDailyLoss: 500,
-  maxDrawdown: 10,
-  notificationsEnabled: true,
-  autoRefresh: true,
+  notifications: {
+    email_enabled: true,
+    push_enabled: true,
+    signal_alerts: true,
+    trade_alerts: true,
+  },
+  display: {
+    theme: "dark",
+    language: "en",
+    timezone: "UTC",
+    currency: "USD",
+  },
+  risk: {
+    max_position_size_pct: 5.0,
+    max_daily_loss_pct: 2.0,
+    max_drawdown_pct: 10.0,
+    auto_stop_loss: true,
+  },
+  trading: {
+    default_order_type: "limit",
+    confirmation_required: true,
+    paper_trading: true,
+  },
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: { ...defaults },
+  connectionInfo: {
+    apiEndpoint: "http://localhost:8000",
+    wsEndpoint: "ws://localhost:8000/ws",
+  },
   loaded: false,
   saving: false,
   saved: false,
 
   loadSettings: async () => {
-    const keys = Object.keys(defaults) as (keyof AppSettings)[];
-    const loaded: Record<string, unknown> = {};
+    // Load connection endpoints from Tauri store
+    const apiEndpoint =
+      (await tauriBridge.getSetting<string>("apiEndpoint")) ?? "http://localhost:8000";
+    const wsEndpoint =
+      (await tauriBridge.getSetting<string>("wsEndpoint")) ?? "ws://localhost:8000/ws";
 
-    for (const key of keys) {
-      const val = await tauriBridge.getSetting(key);
-      if (val !== null) loaded[key] = val;
+    set({
+      connectionInfo: { apiEndpoint, wsEndpoint },
+    });
+
+    // Wire up API and WebSocket
+    api.setBaseUrl(apiEndpoint);
+    wsClient.setUrl(wsEndpoint);
+
+    // Try to load settings from backend
+    try {
+      const backendSettings = await api.getSettings();
+      set({ settings: backendSettings, loaded: true });
+    } catch {
+      // Backend unavailable — use defaults
+      set({ settings: { ...defaults }, loaded: true });
     }
-
-    const settings = { ...defaults, ...loaded } as AppSettings;
-    set({ settings, loaded: true });
-
-    // Wire up API and WebSocket with saved settings
-    api.setBaseUrl(settings.apiEndpoint);
-    wsClient.setUrl(settings.wsEndpoint);
   },
 
   saveSettings: async (updates) => {
     set({ saving: true, saved: false });
     try {
-      const merged = { ...get().settings, ...updates };
-      // Persist each changed key via Tauri secure store
-      for (const [key, value] of Object.entries(updates)) {
-        await tauriBridge.setSetting(key, value);
+      // Save to backend
+      try {
+        const result = await api.updateSettings(updates);
+        set({ settings: result.settings });
+      } catch {
+        // Backend unavailable — merge locally
+        const merged = { ...get().settings };
+        if (updates.notifications)
+          merged.notifications = { ...merged.notifications, ...updates.notifications };
+        if (updates.display)
+          merged.display = { ...merged.display, ...updates.display };
+        if (updates.risk) merged.risk = { ...merged.risk, ...updates.risk };
+        if (updates.trading)
+          merged.trading = { ...merged.trading, ...updates.trading };
+        set({ settings: merged });
       }
-      set({ settings: merged, saved: true });
 
-      // Reconfigure API/WS if endpoints changed
-      if (updates.apiEndpoint) api.setBaseUrl(updates.apiEndpoint);
-      if (updates.wsEndpoint) wsClient.setUrl(updates.wsEndpoint);
-
-      // Reset saved indicator after 2s
+      set({ saved: true });
       setTimeout(() => set({ saved: false }), 2000);
     } finally {
       set({ saving: false });
@@ -78,7 +113,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const health = await api.getHealth();
       return {
         ok: health.status === "ok",
-        message: `Connected — ${health.status}`,
+        message: `Connected — v${health.version}, ${health.agents.length} agents active`,
+        health,
       };
     } catch (e) {
       return {
@@ -86,5 +122,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         message: `Failed: ${(e as Error).message}`,
       };
     }
+  },
+
+  setEndpoints: (apiEndpoint, wsEndpoint) => {
+    set({ connectionInfo: { apiEndpoint, wsEndpoint } });
+    api.setBaseUrl(apiEndpoint);
+    wsClient.setUrl(wsEndpoint);
+    tauriBridge.setSetting("apiEndpoint", apiEndpoint).catch(() => {});
+    tauriBridge.setSetting("wsEndpoint", wsEndpoint).catch(() => {});
   },
 }));
