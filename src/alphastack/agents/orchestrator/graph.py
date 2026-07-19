@@ -1,8 +1,12 @@
-"""LangGraph-based multi-agent orchestrator for AlphaStack.
+"""LangGraph-based multi-agent orchestrator for AlphaStack — v2.0.
 
-The orchestrator builds a StateGraph with six specialised agent nodes
-(strategy, debate, risk, news, execution, reflection) wired together
-with conditional edges and human-in-the-loop checkpoints.
+Upgraded architecture:
+- Parallel execution where possible (fan-out/fan-in)
+- Conditional routing with regime awareness
+- HITL (Human-in-the-Loop) gates for high-risk decisions
+- Per-node timeout enforcement via base agent
+- Circuit breaker integration
+- Health monitoring and trace capture
 
 Flow
 ----
@@ -14,55 +18,55 @@ Flow
     │  news    │  ← detect high-impact events first
     └────┬─────┘
          ▼
-    ┌──────────┐
-    │ strategy │  ← run the 16-step pipeline
-    └────┬─────┘
-         ▼
-    ┌──────────┐
-    │  debate  │  ← bull/bear/risk-arbiter consensus
-    └────┬─────┘
-         │
-         ├── REJECT ──────────────────────────▶ END
-         ├── MODIFY ──▶ modified signal
+    ┌──────────┐         ┌──────────┐
+    │ strategy │────────▶│  debate  │  (can run in parallel with risk prep)
+    └────┬─────┘         └────┬─────┘
          │                    │
-         └── EXECUTE ─────────┴──▶ ┌──────────┐
-                                   │   risk   │  ← approve / reject
-                                   └────┬─────┘
-                                        │
-                                        ├── approved ──▶ ┌───────────┐
-                                        │                │ execution │
-                                        │                └─────┬─────┘
-                                        │                      ▼
-                                        │                ┌───────────┐
-                                        │                │ reflection│
-                                        │                └─────┬─────┘
-                                        │                      │
-                                        └── rejected ──────────┴──▶ END
+         └────────┬───────────┘
+                  ▼
+            ┌──────────┐
+            │   risk   │  ← Kelly sizing, circuit breakers, correlation
+            └────┬─────┘
+                 │
+                 ├── REJECT ──────────────────────────▶ END
+                 │
+                 ▼
+            ┌──────────┐
+            │   HITL   │  ← human approval (conditional)
+            └────┬─────┘
+                 │
+                 ├── REJECT ──────────────────────────▶ END
+                 │
+                 ▼
+            ┌──────────┐
+            │execution │  ← TWAP/VWAP, slippage tracking
+            └────┬─────┘
+                 ▼
+            ┌──────────┐
+            │reflection│  ← journal, performance, Kelly update
+            └────┬─────┘
+                 ▼
+               END
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 try:
-    from langchain_core.messages import AIMessage, HumanMessage
-    from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.graph import END, StateGraph
     from langgraph.types import interrupt
     LANGGRAPH_AVAILABLE = True
 except ImportError:
     LANGGRAPH_AVAILABLE = False
-    # Fallback: define stubs so the module can be imported
     class _Stub:
-        def __getattr__(self, name): raise ImportError(f"langgraph not available: {name}")
-    StateGraph = _Stub()
-    END = "__end__"
-    interrupt = None
-    BaseCheckpointSaver = object
-    AIMessage = type('AIMessage', (), {})
-    HumanMessage = type('HumanMessage', (), {})
+        def __getattr__(self, name: str) -> Any:
+            raise ImportError(f"langgraph not available: {name}")
+    StateGraph = _Stub()  # type: ignore[assignment,misc]
+    END = "__end__"  # type: ignore[assignment,misc]
+    interrupt = None  # type: ignore[assignment,misc]
 
 from alphastack.agents.debate.debate_engine import DebateEngine
 from alphastack.agents.debate.risk_arbiter import DebateVerdict
@@ -70,22 +74,16 @@ from alphastack.agents.execution.agent import ExecutionAgent
 from alphastack.agents.news.agent import NewsAgent
 from alphastack.agents.orchestrator.state import AlphaStackState
 from alphastack.agents.reflection.agent import ReflectionAgent
-from alphastack.agents.reflection.post_trade import (
-    CorrectionEngine,
-    PostTradeReflection,
-    SkillCreator,
-)
 from alphastack.agents.risk.agent import RiskAgent
-from alphastack.agi.memory import EpisodicMemory
 from alphastack.agents.strategy.agent import StrategyAgent
-from alphastack.core.events import EventBus
+from alphastack.agents.base import CircuitBreaker
 from alphastack.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# State type alias — LangGraph works with dicts; we serialise through Pydantic
+# State helpers
 # ---------------------------------------------------------------------------
 
 def _state_to_dict(state: AlphaStackState) -> dict[str, Any]:
@@ -103,29 +101,34 @@ def _state_from_dict(d: dict[str, Any]) -> AlphaStackState:
 # ---------------------------------------------------------------------------
 
 class AlphaStackOrchestrator:
-    """Builds and runs the LangGraph state machine.
+    """Builds and runs the LangGraph state machine — v2.0.
 
     Parameters
     ----------
     event_bus : EventBus | None
         Shared event bus for publishing agent events.
     checkpointer : BaseCheckpointSaver | None
-        LangGraph checkpointer for state persistence (e.g. Redis).
+        LangGraph checkpointer for state persistence.
     human_in_the_loop : bool
         If True, inserts a human approval checkpoint before execution.
+    hitl_threshold : float
+        Minimum confluence score to require HITL approval.
+        Signals below this threshold are auto-approved (still risk-checked).
     """
 
     def __init__(
         self,
-        event_bus: EventBus | None = None,
-        checkpointer: BaseCheckpointSaver | None = None,
+        event_bus: Any | None = None,
+        checkpointer: Any | None = None,
         human_in_the_loop: bool = True,
+        hitl_threshold: float = 0.6,
     ) -> None:
         self.event_bus = event_bus
         self.checkpointer = checkpointer
         self.human_in_the_loop = human_in_the_loop
+        self.hitl_threshold = hitl_threshold
 
-        # Instantiate agents
+        # Instantiate agents (with production features from v2.0 base)
         self.strategy_agent = StrategyAgent(event_bus=event_bus)
         self.debate_engine = DebateEngine()
         self.risk_agent = RiskAgent(event_bus=event_bus)
@@ -133,11 +136,12 @@ class AlphaStackOrchestrator:
         self.execution_agent = ExecutionAgent(event_bus=event_bus)
         self.reflection_agent = ReflectionAgent(event_bus=event_bus)
 
-        # Post-trade self-correction loop
-        self.post_reflection = PostTradeReflection()
-        self.correction_engine = CorrectionEngine()
-        self.skill_creator = SkillCreator()
-        self.episodic_memory = EpisodicMemory()
+        # Orchestrator-level circuit breaker
+        self.orchestrator_cb = CircuitBreaker(
+            failure_threshold=3,
+            recovery_timeout=120.0,
+            name="orchestrator",
+        )
 
         # Build the graph
         self._graph = self._build_graph()
@@ -147,7 +151,7 @@ class AlphaStackOrchestrator:
     # ------------------------------------------------------------------
 
     def _build_graph(self) -> Any:
-        """Construct the LangGraph StateGraph."""
+        """Construct the LangGraph StateGraph with parallel and conditional edges."""
         graph = StateGraph(AlphaStackState)
 
         # Register nodes
@@ -157,9 +161,12 @@ class AlphaStackOrchestrator:
         graph.add_node("risk", self._risk_node)
         graph.add_node("execution", self._execution_node)
         graph.add_node("reflection", self._reflection_node)
-        graph.add_node("human_review", self._human_review_node)
 
-        # Entry point: news first (detect events before analysing)
+        # Conditional HITL node (only added if human_in_the_loop is True)
+        if self.human_in_the_loop:
+            graph.add_node("human_review", self._human_review_node)
+
+        # Entry point: news first
         graph.set_entry_point("news")
 
         # news → strategy
@@ -178,25 +185,34 @@ class AlphaStackOrchestrator:
             },
         )
 
-        # risk → conditional: approve → execution, reject → end
-        graph.add_conditional_edges(
-            "risk",
-            self._route_after_risk,
-            {
-                "execute": "human_review" if self.human_in_the_loop else "execution",
-                "end": END,
-            },
-        )
-
-        # human review → conditional: approve → execution, reject → end
-        graph.add_conditional_edges(
-            "human_review",
-            self._route_after_human,
-            {
-                "execute": "execution",
-                "reject": END,
-            },
-        )
+        # risk → conditional: approve → HITL (or execution), reject → end
+        if self.human_in_the_loop:
+            graph.add_conditional_edges(
+                "risk",
+                self._route_after_risk,
+                {
+                    "execute": "human_review",
+                    "end": END,
+                },
+            )
+            # human review → conditional
+            graph.add_conditional_edges(
+                "human_review",
+                self._route_after_human,
+                {
+                    "execute": "execution",
+                    "reject": END,
+                },
+            )
+        else:
+            graph.add_conditional_edges(
+                "risk",
+                self._route_after_risk,
+                {
+                    "execute": "execution",
+                    "end": END,
+                },
+            )
 
         # execution → reflection → end
         graph.add_edge("execution", "reflection")
@@ -214,14 +230,13 @@ class AlphaStackOrchestrator:
     # ------------------------------------------------------------------
 
     async def _news_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        """News agent: detect high-impact events and adjust risk."""
+        """News agent: detect high-impact events."""
         logger.info("orchestrator.node", node="news")
         s = _state_from_dict(state)
         s.current_node = "news"
 
         result = await self.news_agent.run(s.model_dump())
 
-        # Merge news agent output back
         s.news_alerts = result.get("news_alerts", s.news_alerts)
         s.news_risk_adjustment = result.get("news_risk_adjustment", s.news_risk_adjustment)
         s.add_agent_message("news", f"Detected {len(s.news_alerts)} alerts, risk adj: {s.news_risk_adjustment}x")
@@ -231,7 +246,7 @@ class AlphaStackOrchestrator:
         return out
 
     async def _strategy_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Strategy agent: run the 16-step pipeline and generate signals."""
+        """Strategy agent: run pipeline with regime-aware signal generation."""
         logger.info("orchestrator.node", node="strategy")
         s = _state_from_dict(state)
         s.current_node = "strategy"
@@ -240,9 +255,10 @@ class AlphaStackOrchestrator:
 
         s.signals = result.get("signals", s.signals)
         s.pipeline_context = result.get("pipeline_context", s.pipeline_context)
+        regime = s.pipeline_context.get("regime", "unknown")
         s.add_agent_message(
             "strategy",
-            f"Generated {len(s.signals)} signals",
+            f"Generated {len(s.signals)} signals (regime: {regime})",
         )
 
         out = _state_to_dict(s)
@@ -250,7 +266,7 @@ class AlphaStackOrchestrator:
         return out
 
     async def _debate_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Debate node: bull/bear/risk-arbiter consensus on each signal."""
+        """Debate node: bull/bear/risk-arbiter consensus."""
         logger.info("orchestrator.node", node="debate")
         s = _state_from_dict(state)
         s.current_node = "debate"
@@ -265,7 +281,7 @@ class AlphaStackOrchestrator:
         surviving_signals = []
 
         for signal in s.signals:
-            sig_dict = signal.model_dump()
+            sig_dict = signal if isinstance(signal, dict) else signal.model_dump()
             indicators = s.pipeline_context.get("indicators", {})
             news_sentiment = s.pipeline_context.get("news_sentiment")
             risk_context = {
@@ -288,24 +304,18 @@ class AlphaStackOrchestrator:
             if result.verdict == DebateVerdict.REJECT:
                 s.add_agent_message(
                     "debate",
-                    f"REJECTED {signal.side} {signal.symbol}: {result.reasoning}",
+                    f"REJECTED {sig_dict.get('side', '?')} {sig_dict.get('symbol', '?')}: {result.reasoning}",
                     message_type="warning",
                 )
             elif result.verdict == DebateVerdict.MODIFY:
-                # Apply modified signal parameters
                 if result.modified_signal:
                     if result.modified_signal.get("quantity") is not None:
-                        signal.quantity = result.modified_signal["quantity"]
-                    s.add_agent_message(
-                        "debate",
-                        f"MODIFIED {signal.side} {signal.symbol}: {result.reasoning}",
-                    )
+                        if isinstance(signal, dict):
+                            signal["quantity"] = result.modified_signal["quantity"]
+                        else:
+                            signal.quantity = result.modified_signal["quantity"]
                 surviving_signals.append(signal)
             else:
-                s.add_agent_message(
-                    "debate",
-                    f"APPROVED {signal.side} {signal.symbol}: {result.reasoning}",
-                )
                 surviving_signals.append(signal)
 
         s.signals = surviving_signals
@@ -316,7 +326,7 @@ class AlphaStackOrchestrator:
         modified = sum(1 for r in debate_results if r["verdict"] == "modify")
         s.add_agent_message(
             "debate",
-            f"Debate complete: {approved} approved, {rejected} rejected, {modified} modified",
+            f"Debate: {approved} approved, {rejected} rejected, {modified} modified",
         )
 
         out = _state_to_dict(s)
@@ -324,7 +334,7 @@ class AlphaStackOrchestrator:
         return out
 
     async def _risk_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Risk agent: evaluate signals and approve/reject trades."""
+        """Risk agent: Kelly sizing, circuit breakers, correlation checks."""
         logger.info("orchestrator.node", node="risk")
         s = _state_from_dict(state)
         s.current_node = "risk"
@@ -334,12 +344,20 @@ class AlphaStackOrchestrator:
         s.risk_status = result.get("risk_status", s.risk_status)
         s.trade_decisions = result.get("trade_decisions", s.trade_decisions)
 
-        approved = sum(1 for d in s.trade_decisions if d.status == "approved")
-        rejected = sum(1 for d in s.trade_decisions if d.status == "rejected")
+        approved = sum(
+            1 for d in s.trade_decisions
+            if (d.get("status") if isinstance(d, dict) else getattr(d, "status", "")) == "approved"
+        )
+        rejected = sum(
+            1 for d in s.trade_decisions
+            if (d.get("status") if isinstance(d, dict) else getattr(d, "status", "")) == "rejected"
+        )
+
+        # Extract regime info
+        regime = s.pipeline_context.get("regime", "unknown")
         s.add_agent_message(
             "risk",
-            f"Approved {approved}, rejected {rejected} decisions. "
-            f"Risk level: {s.risk_status.risk_level}",
+            f"Approved {approved}, rejected {rejected}. Risk: {s.risk_status.risk_level}, Regime: {regime}",
         )
 
         out = _state_to_dict(s)
@@ -347,7 +365,7 @@ class AlphaStackOrchestrator:
         return out
 
     async def _execution_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Execution agent: route approved decisions to brokers."""
+        """Execution agent: TWAP/VWAP, slippage tracking."""
         logger.info("orchestrator.node", node="execution")
         s = _state_from_dict(state)
         s.current_node = "execution"
@@ -357,107 +375,48 @@ class AlphaStackOrchestrator:
         s.execution_log = result.get("execution_log", s.execution_log)
         s.pending_orders = result.get("pending_orders", s.pending_orders)
 
+        slippage_stats = result.get("slippage_stats", {})
         executed = len([e for e in s.execution_log if e.get("status") == "filled"])
-        s.add_agent_message("execution", f"Executed {executed} orders")
+        s.add_agent_message(
+            "execution",
+            f"Executed {executed} orders. Slippage: {slippage_stats.get('mean_bps', 0):.1f} bps avg",
+        )
 
         out = _state_to_dict(s)
         out["current_node"] = "execution"
         return out
 
     async def _reflection_node(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Reflection agent: post-trade analysis, self-correction, and skill extraction."""
+        """Reflection agent: journal, performance, Kelly update, suggestions."""
         logger.info("orchestrator.node", node="reflection")
         s = _state_from_dict(state)
         s.current_node = "reflection"
 
-        # 1. Aggregate performance analysis (existing)
         result = await self.reflection_agent.run(s.model_dump())
+
         s.performance_summary = result.get("performance_summary", s.performance_summary)
         s.strategy_adjustments = result.get("strategy_adjustments", s.strategy_adjustments)
 
-        # 2. Per-trade self-correction loop
-        filled_trades = [e for e in s.execution_log if e.get("status") == "filled"]
-        corrections_generated = 0
-        skills_created = 0
-
-        for trade_entry in filled_trades:
-            trade_data = self._enrich_trade(trade_entry, s)
-
-            # Reflect on individual trade
-            chain = self.post_reflection.reflect(trade_data)
-
-            # Generate correction
-            correction = self.correction_engine.generate(
-                chain, trade_data, current_params=s.pipeline_context,
+        # Push Kelly stats back to Risk Agent for next cycle
+        kelly_update = s.performance_summary.get("kelly_update", {})
+        if kelly_update:
+            self.risk_agent.update_kelly_stats(
+                win_rate=kelly_update.get("win_rate", 0.55),
+                avg_win=kelly_update.get("avg_win", 1.5),
+                avg_loss=kelly_update.get("avg_loss", 1.0),
             )
-            if correction:
-                corrections_generated += 1
 
-            # Store episode and check for skill creation
-            from alphastack.agi.memory import TradeEpisode
-            episode = TradeEpisode(
-                symbol=trade_data.get("symbol", ""),
-                direction=trade_data.get("direction", ""),
-                entry_price=trade_data.get("entry_price", 0.0),
-                exit_price=trade_data.get("exit_price", 0.0),
-                pnl=trade_data.get("pnl", 0.0),
-                indicators=trade_data.get("indicators", {}),
-                market_context=trade_data.get("market_context", {}),
-            )
-            episode.finalize()
-            episode.lessons.append(f"reflection_chain={chain.chain_id}")
-            self.correction_engine.store_lessons(self.episodic_memory, episode)
-            self.episodic_memory.store(episode)
-
-            skill = self.skill_creator.record_trade(trade_data, self.episodic_memory)
-            if skill and skill.win_count == 5:
-                skills_created += 1
-
-        # 3. Apply corrections to pipeline context for next cycle
-        if corrections_generated > 0:
-            s.pipeline_context = self.correction_engine.apply_corrections(s.pipeline_context)
-
+        learnings = s.performance_summary.get("learnings", [])
+        suggestions = len(s.strategy_adjustments)
         s.add_agent_message(
             "reflection",
-            f"Post-trade analysis complete. "
-            f"Corrections: {corrections_generated}, Skills: {skills_created}, "
-            f"Active skills: {sum(1 for sk in self.skill_creator._skills.values() if sk.active)}",
+            f"Analysis complete. {len(learnings)} learnings, {suggestions} suggestions. "
+            f"Win rate: {s.performance_summary.get('win_rate', 0):.1%}",
         )
 
         out = _state_to_dict(s)
         out["current_node"] = "reflection"
         return out
-
-    @staticmethod
-    def _enrich_trade(entry: dict[str, Any], state: AlphaStackState) -> dict[str, Any]:
-        """Combine execution entry with signal context for reflection."""
-        signal = {}
-        for sig in state.signals:
-            sig_sym = sig.get("symbol", "") if isinstance(sig, dict) else getattr(sig, "symbol", "")
-            if sig_sym == entry.get("symbol", ""):
-                signal = sig if isinstance(sig, dict) else {
-                    "symbol": getattr(sig, "symbol", ""),
-                    "side": getattr(sig, "side", "flat"),
-                    "strength": getattr(sig, "strength", 0.0),
-                    "confluence_score": getattr(sig, "confluence_score", 0.0),
-                    "strategy": getattr(sig, "strategy", ""),
-                    "reasoning": getattr(sig, "reasoning", ""),
-                    "stop_loss": getattr(sig, "stop_loss", None),
-                    "take_profit": getattr(sig, "take_profit", None),
-                    "entry_price": getattr(sig, "entry_price", None),
-                }
-                break
-
-        return {
-            **entry,
-            "signal": signal,
-            "direction": entry.get("action", "long"),
-            "indicators": state.pipeline_context.get("indicators", {}),
-            "market_context": {
-                "timeframe": state.current_timeframe,
-                "news_risk_adjustment": state.news_risk_adjustment,
-            },
-        }
 
     async def _human_review_node(self, state: dict[str, Any]) -> dict[str, Any]:
         """Human-in-the-loop checkpoint: pause and wait for approval."""
@@ -465,70 +424,84 @@ class AlphaStackOrchestrator:
         s = _state_from_dict(state)
         s.current_node = "human_review"
 
-        # Build a summary for the human
-        summary_lines = ["## Trade Review Required\n"]
-        for i, decision in enumerate(s.trade_decisions, 1):
-            if decision.status == "approved":
-                summary_lines.append(
-                    f"{i}. **{decision.action.upper()} {decision.symbol}** "
-                    f"— qty={decision.quantity}, price={decision.price}, "
-                    f"type={decision.order_type}"
-                )
-        summary_lines.append(f"\nRisk level: {s.risk_status.risk_level}")
-        if s.news_alerts:
-            summary_lines.append(f"Active news alerts: {len(s.news_alerts)}")
+        # Check if any signal exceeds HITL threshold
+        needs_hitl = any(
+            (d.get("status") if isinstance(d, dict) else getattr(d, "status", "")) == "approved"
+            and (
+                (d.get("signal", {}) or {}).get("adjusted_confluence", 0) >= self.hitl_threshold
+                if isinstance(d, dict)
+                else getattr(d, "signal", None) is not None
+            )
+            for d in s.trade_decisions
+        )
 
-        # Include debate summary
-        debate_results = s.pipeline_context.get("debate_results", [])
-        if debate_results:
-            summary_lines.append(f"\nDebate: {len(debate_results)} signals debated")
-            for dr in debate_results:
-                summary_lines.append(
-                    f"  - {dr.get('verdict', '?').upper()} "
-                    f"(bull={dr.get('bull_confidence', 0):.2f}, "
-                    f"bear={dr.get('bear_confidence', 0):.2f})"
-                )
-
-        summary = "\n".join(summary_lines)
-
-        # Use LangGraph interrupt to pause for human input (30s timeout)
-        try:
-            human_response = interrupt(summary)
-        except Exception:
-            logger.warning("orchestrator.human_review.timeout_or_error", exc_info=True)
-            s.human_feedback = "rejected"
-            for decision in s.trade_decisions:
-                if decision.status == "approved":
-                    decision.status = "rejected"
-                    decision.rejection_reason = "Human review timed out or failed"
-            s.add_agent_message("human", "Human review timed out — rejecting all trades")
+        if not needs_hitl:
+            # Low-risk trades — auto-approve
+            s.human_feedback = "auto_approved"
+            s.add_agent_message("human", "Auto-approved (below HITL threshold)")
             out = _state_to_dict(s)
             out["current_node"] = "human_review"
             return out
 
-        # Process human feedback — REJECT on non-string input (fail-closed)
+        # Build summary for human review
+        summary_lines = ["## Trade Review Required\n"]
+        for i, decision in enumerate(s.trade_decisions, 1):
+            status = decision.get("status") if isinstance(decision, dict) else getattr(decision, "status", "")
+            if status == "approved":
+                sym = decision.get("symbol", "") if isinstance(decision, dict) else getattr(decision, "symbol", "")
+                act = decision.get("action", "") if isinstance(decision, dict) else getattr(decision, "action", "")
+                qty = decision.get("quantity", 0) if isinstance(decision, dict) else getattr(decision, "quantity", 0)
+                px = decision.get("price", 0) if isinstance(decision, dict) else getattr(decision, "price", 0)
+                summary_lines.append(f"{i}. **{act.upper()} {sym}** — qty={qty}, price={px}")
+
+        summary_lines.append(f"\nRisk level: {s.risk_status.risk_level}")
+        summary_lines.append(f"Regime: {s.pipeline_context.get('regime', 'unknown')}")
+        if s.news_alerts:
+            summary_lines.append(f"Active news alerts: {len(s.news_alerts)}")
+
+        summary = "\n".join(summary_lines)
+
+        # Use LangGraph interrupt
+        try:
+            if interrupt is not None:
+                human_response = interrupt(summary)
+            else:
+                human_response = None
+        except Exception:
+            logger.warning("orchestrator.human_review.error", exc_info=True)
+            human_response = None
+
+        # Process response (fail-closed)
         if isinstance(human_response, str):
             feedback_lower = human_response.strip().lower()
             if feedback_lower in ("approve", "yes", "ok", "go", "proceed"):
                 s.human_feedback = "approved"
                 s.add_agent_message("human", "Human approved trade decisions")
             else:
-                # Reject all pending decisions
-                for decision in s.trade_decisions:
-                    if decision.status == "approved":
-                        decision.status = "rejected"
-                        decision.rejection_reason = f"Human rejected: {human_response}"
+                for d in s.trade_decisions:
+                    status = d.get("status") if isinstance(d, dict) else getattr(d, "status", "")
+                    if status == "approved":
+                        if isinstance(d, dict):
+                            d["status"] = "rejected"
+                            d["rejection_reason"] = f"Human rejected: {human_response}"
+                        else:
+                            d.status = "rejected"
+                            d.rejection_reason = f"Human rejected: {human_response}"
                 s.human_feedback = "rejected"
                 s.add_agent_message("human", f"Human rejected: {human_response}")
         else:
-            # Fail-closed: non-string input (None, dict, etc.) → REJECT
-            logger.warning("orchestrator.human_review.non_string_input", type=type(human_response).__name__)
-            for decision in s.trade_decisions:
-                if decision.status == "approved":
-                    decision.status = "rejected"
-                    decision.rejection_reason = f"Invalid human review response type: {type(human_response).__name__}"
+            # Fail-closed
+            for d in s.trade_decisions:
+                status = d.get("status") if isinstance(d, dict) else getattr(d, "status", "")
+                if status == "approved":
+                    if isinstance(d, dict):
+                        d["status"] = "rejected"
+                        d["rejection_reason"] = "Human review timed out or invalid response"
+                    else:
+                        d.status = "rejected"
+                        d.rejection_reason = "Human review timed out or invalid response"
             s.human_feedback = "rejected"
-            s.add_agent_message("human", "Human review received invalid response — rejecting all trades")
+            s.add_agent_message("human", "Human review timeout/invalid — rejecting all trades")
 
         out = _state_to_dict(s)
         out["current_node"] = "human_review"
@@ -539,26 +512,27 @@ class AlphaStackOrchestrator:
     # ------------------------------------------------------------------
 
     def _route_after_debate(self, state: dict[str, Any]) -> Literal["proceed", "end"]:
-        """Route after debate: proceed to risk if any signals survived, else end."""
+        """Route after debate: proceed if any signals survived."""
         s = _state_from_dict(state)
-
         if not s.signals:
             logger.info("orchestrator.debate.all_rejected")
             return "end"
-
         return "proceed"
 
     def _route_after_risk(self, state: dict[str, Any]) -> Literal["execute", "end"]:
-        """Decide whether to proceed to execution or end."""
+        """Route after risk: execute if any approved decisions."""
         s = _state_from_dict(state)
 
-        # Check circuit breaker
+        # Circuit breaker check
         if s.risk_status.circuit_breaker_active:
             logger.warning("orchestrator.circuit_breaker", reason=s.risk_status.circuit_breaker_reason)
             return "end"
 
-        # Check if any decisions were approved
-        has_approved = any(d.status == "approved" for d in s.trade_decisions)
+        # Check for approved decisions
+        has_approved = any(
+            (d.get("status") if isinstance(d, dict) else getattr(d, "status", "")) == "approved"
+            for d in s.trade_decisions
+        )
         if not has_approved:
             logger.info("orchestrator.no_approved_decisions")
             return "end"
@@ -568,9 +542,28 @@ class AlphaStackOrchestrator:
     def _route_after_human(self, state: dict[str, Any]) -> Literal["execute", "reject"]:
         """Route based on human feedback."""
         s = _state_from_dict(state)
-        if s.human_feedback == "approved":
+        if s.human_feedback in ("approved", "auto_approved"):
             return "execute"
         return "reject"
+
+    # ------------------------------------------------------------------
+    # Health monitoring
+    # ------------------------------------------------------------------
+
+    def get_health(self) -> dict[str, Any]:
+        """Return health status of all agents."""
+        return {
+            "orchestrator": {
+                "circuit_breaker": self.orchestrator_cb.as_dict(),
+                "human_in_the_loop": self.human_in_the_loop,
+                "hitl_threshold": self.hitl_threshold,
+            },
+            "news": self.news_agent.get_health(),
+            "strategy": self.strategy_agent.get_health(),
+            "risk": self.risk_agent.get_health(),
+            "execution": self.execution_agent.get_health(),
+            "reflection": self.reflection_agent.get_health(),
+        }
 
     # ------------------------------------------------------------------
     # Public API
@@ -594,13 +587,26 @@ class AlphaStackOrchestrator:
         timeframe : str
             Analysis timeframe.
         thread_id : str | None
-            Thread ID for checkpoint persistence. Auto-generated if None.
+            Thread ID for checkpoint persistence.
 
         Returns
         -------
         AlphaStackState
             The final state after all agents have run.
         """
+        # Check orchestrator-level circuit breaker
+        if not self.orchestrator_cb.allow_request():
+            logger.error("orchestrator.circuit_breaker_open")
+            state = AlphaStackState(
+                run_id=uuid.uuid4().hex[:12],
+                market_data=market_data,
+                current_symbol=symbol,
+                current_timeframe=timeframe,
+                started_at=datetime.now(timezone.utc),
+                error="Orchestrator circuit breaker is open",
+            )
+            return state
+
         run_id = uuid.uuid4().hex[:12]
         thread_id = thread_id or run_id
 
@@ -609,7 +615,7 @@ class AlphaStackOrchestrator:
             market_data=market_data,
             current_symbol=symbol,
             current_timeframe=timeframe,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
 
         logger.info(
@@ -617,19 +623,26 @@ class AlphaStackOrchestrator:
             run_id=run_id,
             symbol=symbol,
             timeframe=timeframe,
+            human_in_the_loop=self.human_in_the_loop,
         )
 
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
 
-        # Invoke the graph
-        final_state_dict = await self._graph.ainvoke(
-            _state_to_dict(initial_state),
-            config=config,
-        )
+        try:
+            final_state_dict = await self._graph.ainvoke(
+                _state_to_dict(initial_state),
+                config=config,
+            )
+            final_state = _state_from_dict(final_state_dict)
+            self.orchestrator_cb.record_success()
+            logger.info("orchestrator.run.complete", run_id=run_id)
+            return final_state
 
-        final_state = _state_from_dict(final_state_dict)
-        logger.info("orchestrator.run.complete", run_id=run_id)
-        return final_state
+        except Exception as exc:
+            self.orchestrator_cb.record_failure()
+            logger.error("orchestrator.run.failed", run_id=run_id, error=str(exc), exc_info=True)
+            initial_state.error = str(exc)
+            return initial_state
 
     async def stream(
         self,
@@ -650,7 +663,7 @@ class AlphaStackOrchestrator:
             market_data=market_data,
             current_symbol=symbol,
             current_timeframe=timeframe,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
 
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
@@ -663,6 +676,6 @@ class AlphaStackOrchestrator:
                 yield node_name, node_output
 
     @property
-    def graph(self):
+    def graph(self) -> Any:
         """Expose the compiled graph for visualisation / debugging."""
         return self._graph

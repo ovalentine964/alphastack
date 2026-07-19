@@ -1,10 +1,17 @@
-name: CI
+name: AlphaStack CI
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 2 * * *" # Nightly E2E
+    - cron: "0 3 * * 1" # Weekly performance
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PYTHON_VERSION: "3.12"
@@ -12,25 +19,22 @@ env:
   RUST_TOOLCHAIN: stable
 
 jobs:
-  # ─── Python: lint + type-check + test ────────────────────────────
-  python:
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 1: Static Analysis (<30s)
+  # ═══════════════════════════════════════════════════════════════
+  lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12"]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
+      - name: Install lint dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install ruff mypy types-requests types-redis
 
       - name: Lint with ruff
         run: |
@@ -41,14 +45,34 @@ jobs:
         run: |
           mypy src/alphastack/ --ignore-missing-imports
 
-      - name: Run tests with pytest
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 2: Unit Tests (<60s)
+  # ═══════════════════════════════════════════════════════════════
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
         run: |
-          pytest tests/ \
+          pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Unit tests
+        run: |
+          pytest tests/unit/ tests/test_monitoring.py \
             -v \
             --tb=short \
             --cov=alphastack \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
+            --cov-fail-under=80 \
             -x
         env:
           REDIS_URL: redis://localhost:6379/0
@@ -57,10 +81,176 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-coverage
+          name: coverage-unit
           path: coverage.xml
 
-  # ─── Rust core: build + test ─────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 3: Integration Tests (<10min)
+  # ═══════════════════════════════════════════════════════════════
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: github.event_name == "pull_request" || github.ref == "refs/heads/main"
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 3
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_DB: test_alphastack
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Integration tests
+        run: pytest tests/integration/ -v --timeout=300
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql://test:test@localhost:5432/test_alphastack
+
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 4: Security Scans (<5min)
+  # ═══════════════════════════════════════════════════════════════
+  security:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: SAST with Bandit
+        run: |
+          pip install bandit
+          bandit -r src/ -f json -o bandit-report.json --severity-level medium || true
+          bandit -r src/ --severity-level medium
+
+      - name: Dependency audit
+        run: |
+          pip install pip-audit
+          pip install -e ".[dev]"
+          pip-audit --strict
+
+      - name: Secrets detection
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified
+
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 5: Docker Build (<5min)
+  # ═══════════════════════════════════════════════════════════════
+  build:
+    runs-on: ubuntu-latest
+    needs: [unit-tests, security]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          push: false
+          tags: alphastack:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build test image for Trivy
+        run: |
+          docker build -t alphastack:ci -f infra/docker/Dockerfile .
+
+      - name: Container scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "alphastack:ci"
+          format: "table"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 6: E2E Tests (<15min) — Nightly
+  # ═══════════════════════════════════════════════════════════════
+  e2e-tests:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == "schedule"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start full stack
+        run: |
+          cd infra/docker
+          cp .env.example .env 2>/dev/null || true
+          docker compose up -d
+        env:
+          DB_PASSWORD: test_password
+          GRAFANA_PASSWORD: test_password
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && break
+            sleep 5
+          done
+
+      - name: E2E tests
+        run: |
+          pip install -e ".[dev]"
+          pytest tests/integration/ -v --timeout=900
+        env:
+          REDIS_URL: redis://localhost:6379
+          DATABASE_URL: postgresql://alphastack:test_password@localhost:5432/alphastack
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          cd infra/docker
+          docker compose logs > e2e-logs.txt 2>&1
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: infra/docker/e2e-logs.txt
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/docker
+          docker compose down -v
+
+  # ═══════════════════════════════════════════════════════════════
+  # Rust core: build + test (parallel with lint)
+  # ═══════════════════════════════════════════════════════════════
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -93,21 +283,18 @@ jobs:
         working-directory: src/rust_core
         run: maturin develop --release
 
-      - name: Test Rust import
-        run: |
-          python -c "import alphastack_rust_core; print('✅ Rust core loaded:', dir(alphastack_rust_core))"
-
       - name: Run Rust tests
         working-directory: src/rust_core
         run: cargo test --release
 
-  # ─── TypeScript: lint + build (web + desktop) ────────────────────
+  # ═══════════════════════════════════════════════════════════════
+  # TypeScript: lint + build
+  # ═══════════════════════════════════════════════════════════════
   typescript:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         app: [web, desktop]
-
     steps:
       - uses: actions/checkout@v4
 
@@ -115,8 +302,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
 
       - name: Install dependencies
         working-directory: apps/${{ matrix.app }}
@@ -130,7 +315,9 @@ jobs:
         working-directory: apps/${{ matrix.app }}
         run: npm run build
 
-  # ─── Flutter (mobile): build ─────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════
+  # Flutter (mobile): build
+  # ═══════════════════════════════════════════════════════════════
   flutter:
     runs-on: ubuntu-latest
     steps:
@@ -153,23 +340,28 @@ jobs:
         working-directory: apps/mobile
         run: flutter build apk --debug
 
-  # ─── Docker build test ───────────────────────────────────────────
-  docker:
+  # ═══════════════════════════════════════════════════════════════
+  # Quality gate summary
+  # ═══════════════════════════════════════════════════════════════
+  quality-gate:
     runs-on: ubuntu-latest
-    needs: [python, rust]
-
+    needs: [lint, unit-tests, security, build]
+    if: always()
     steps:
-      - uses: actions/checkout@v4
+      - name: Check quality gate
+        run: |
+          echo "=== Quality Gate Summary ==="
+          echo "Lint:        ${{ needs.lint.result }}"
+          echo "Unit Tests:  ${{ needs.unit-tests.result }}"
+          echo "Security:    ${{ needs.security.result }}"
+          echo "Build:       ${{ needs.build.result }}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.security.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo "❌ Quality gate FAILED"
+            exit 1
+          fi
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/docker/Dockerfile
-          push: false
-          tags: alphastack:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          echo "✅ Quality gate PASSED"

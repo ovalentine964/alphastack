@@ -10,7 +10,7 @@ from alphastack.risk.circuit_breaker import BreakerType, CircuitBreaker
 from alphastack.risk.correlation import CorrelationMonitor, OpenPosition
 from alphastack.risk.drawdown import DrawdownManager
 from alphastack.risk.exposure import ExposureManager, PositionExposure
-from alphastack.risk.governor import RiskApproval, RiskGovernor, RiskEvent, RiskEventType, TradeApproval, TradeRequest
+from alphastack.risk.governor import TradeApproval, RiskGovernor, RiskEvent, RiskEventType, TradeApproval, TradeRequest
 from alphastack.risk.position_sizer import PositionSizer, SizingMethod, SizingRequest
 from alphastack.risk.validators import TradeValidator, ValidationResult
 

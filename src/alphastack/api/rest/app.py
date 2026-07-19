@@ -306,6 +306,27 @@ def create_app() -> FastAPI:
             media_type=CONTENT_TYPE_LATEST,
         )
 
+    # -- Security middleware (IP allowlist, request signing, audit) -----------
+    try:
+        from alphastack.security.middleware import (
+            IPAllowlistMiddleware,
+            RequestSigningMiddleware,
+            SecurityAuditMiddleware,
+        )
+
+        # IP allowlist (honours ALPHASTACK_IP_ALLOWLIST env var)
+        app.add_middleware(IPAllowlistMiddleware)
+
+        # Request signing validation (honours ALPHASTACK_REQUEST_SIGNING_KEY env var)
+        app.add_middleware(RequestSigningMiddleware)
+
+        # Comprehensive audit logging for all API requests
+        app.add_middleware(SecurityAuditMiddleware)
+
+        logger.info("api_startup.security_middleware_loaded")
+    except Exception as exc:
+        logger.warning("api_startup.security_middleware_skipped", reason=str(exc))
+
     # -- Register routes -----------------------------------------------------
     from alphastack.api.rest.routes.auth import router as auth_router
     from alphastack.api.rest.routes.portfolio import router as portfolio_router

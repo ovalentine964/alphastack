@@ -8,7 +8,7 @@ rule_files:
   - "alert_rules.yml"
 
 scrape_configs:
-  # AlphaStack API metrics
+  # ─── AlphaStack API ──────────────────────────────────────────
   - job_name: "alphastack-api"
     metrics_path: "/metrics"
     static_configs:
@@ -17,7 +17,7 @@ scrape_configs:
           service: "api"
           environment: "production"
 
-  # AlphaStack Trading Engine metrics
+  # ─── AlphaStack Trading Engine ───────────────────────────────
   - job_name: "alphastack-engine"
     metrics_path: "/metrics"
     static_configs:
@@ -26,12 +26,26 @@ scrape_configs:
           service: "engine"
           environment: "production"
 
-  # Prometheus self-monitoring
+  # ─── Prometheus self-monitoring ──────────────────────────────
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
 
-  # Node exporter (optional — add to docker-compose if needed)
-  # - job_name: "node"
-  #   static_configs:
-  #     - targets: ["node-exporter:9100"]
+  # ─── Node Exporter (host metrics) ───────────────────────────
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # ─── Redis Exporter ─────────────────────────────────────────
+  - job_name: "alphastack-redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          service: "redis"
+
+  # ─── PostgreSQL Exporter ────────────────────────────────────
+  - job_name: "alphastack-timescaledb"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          service: "postgres"
