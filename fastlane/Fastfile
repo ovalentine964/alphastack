@@ -1,0 +1,138 @@
+# Fastfile — AlphaStack Mobile Release Automation
+# Usage:
+#   fastlane bump version:1.2.3    — bump version in pubspec.yaml
+#   fastlane build_apk             — build release APK
+#   fastlane release version:1.2.3 — bump + build + create GitHub release
+#
+# Prerequisites:
+#   gem install fastlane
+#   brew install fastlane  (or: brew install fastlane)
+#
+# Environment:
+#   GITHUB_TOKEN          — GitHub PAT with repo scope (for releases)
+#   ANDROID_KEYSTORE_BASE64 — base64-encoded keystore (optional, for signing)
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+
+default_platform(:android)
+
+platform :android do
+
+  # ── Version bump ────────────────────────────────────────────────
+  desc "Bump version in pubspec.yaml"
+  lane :bump do |options|
+    version = options[:version]
+    UI.user_error!("Missing version. Usage: fastlane bump version:1.2.3") unless version
+
+    pubspec_path = "../apps/mobile/pubspec.yaml"
+    UI.user_error!("pubspec.yaml not found at #{pubspec_path}") unless File.exist?(pubspec_path)
+
+    # Parse build number from existing version or default to 1
+    build_number = options[:build_number] || "1"
+    new_version_line = "version: #{version}+#{build_number}"
+
+    content = File.read(pubspec_path)
+    updated = content.sub(/^version:\s*.+$/, new_version_line)
+    File.write(pubspec_path, updated)
+
+    UI.success("✅ Version bumped to #{version}+#{build_number}")
+  end
+
+  # ── Build APK ───────────────────────────────────────────────────
+  desc "Build release APK"
+  lane :build_apk do |options|
+    # Decode keystore if provided
+    if ENV["ANDROID_KEYSTORE_BASE64"] && !ENV["ANDROID_KEYSTORE_BASE64"].empty?
+      keystore_path = File.expand_path("../apps/mobile/android/app/release.keystore")
+      File.open(keystore_path, "wb") do |f|
+        f.write(Base64.decode64(ENV["ANDROID_KEYSTORE_BASE64"]))
+      end
+      UI.success("🔐 Keystore decoded")
+    end
+
+    # flutter pub get
+    sh("cd ../apps/mobile && flutter pub get")
+
+    # flutter build apk
+    build_args = ["flutter", "build", "apk", "--release"]
+    build_args += ["--split-per-abi"] unless options[:universal]
+    sh("cd ../apps/mobile && #{build_args.join(' ')}")
+
+    apk_dir = "../apps/mobile/build/app/outputs/flutter-apk"
+    UI.success("✅ APK built at #{apk_dir}")
+  end
+
+  # ── Full release ────────────────────────────────────────────────
+  desc "Bump version, build APK, and create GitHub release"
+  lane :release do |options|
+    version = options[:version]
+    UI.user_error!("Missing version. Usage: fastlane release version:1.2.3") unless version
+
+    tag = "v#{version}"
+
+    # 1. Bump version
+    bump(version: version, build_number: options[:build_number])
+
+    # 2. Build APK (universal for release)
+    build_apk(universal: true)
+
+    # 3. Commit version bump
+    sh("cd .. && git add apps/mobile/pubspec.yaml")
+    sh("cd .. && git commit -m 'chore(mobile): bump version to #{version}'")
+
+    # 4. Create and push tag
+    sh("cd .. && git tag -a #{tag} -m 'Release #{tag}'")
+    sh("cd .. && git push origin #{tag}")
+
+    # 5. Create GitHub Release via CLI
+    if ENV["GITHUB_TOKEN"]
+      apk_path = File.expand_path("../apps/mobile/build/app/outputs/flutter-apk/app-release.apk")
+      UI.user_error!("APK not found at #{apk_path}") unless File.exist?(apk_path)
+
+      release_notes = "## 📱 AlphaStack Mobile #{tag}\n\n" \
+                      "### Downloads\n" \
+                      "- **Universal APK** — works on all devices\n\n" \
+                      "### Installation\n" \
+                      "1. Download the APK\n" \
+                      "2. Enable \"Install from unknown sources\"\n" \
+                      "3. Open the APK to install"
+
+      sh("gh release create #{tag} " \
+         "#{apk_path} " \
+         "--repo #{ENV['GITHUB_REPOSITORY'] || 'alphastack/alphastack'} " \
+         "--title 'AlphaStack Mobile #{tag}' " \
+         "--notes '#{release_notes}' " \
+         "--generate-notes")
+
+      UI.success("✅ GitHub Release created: #{tag}")
+    else
+      UI.important("⚠️  GITHUB_TOKEN not set — skipping GitHub Release creation")
+      UI.important("   Tag #{tag} has been pushed. Create the release manually or set GITHUB_TOKEN.")
+    end
+
+    UI.success("🚀 Release #{tag} complete!")
+  end
+
+  # ── Submit to Play Store (future) ───────────────────────────────
+  desc "Upload AAB to Google Play (requires Play Store API key)"
+  lane :play_store do |options|
+    track = options[:track] || "internal"
+
+    # Build AAB
+    sh("cd ../apps/mobile && flutter pub get")
+    sh("cd ../apps/mobile && flutter build appbundle --release")
+
+    # Upload via supply (requires setup)
+    # supply(
+    #   track: track,
+    #   aab: "../apps/mobile/build/app/outputs/bundle/release/app-release.aab",
+    #   json_key: ENV["PLAY_STORE_JSON_KEY"],
+    #   package_name: "com.alphastack.mobile"
+    # )
+
+    UI.important("⚠️  Play Store upload not configured yet.")
+    UI.important("   AAB built at: apps/mobile/build/app/outputs/bundle/release/")
+    UI.important("   Upload manually or configure supply with a service account key.")
+  end
+end

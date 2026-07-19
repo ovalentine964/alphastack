@@ -1,4 +1,4 @@
-package com.alphastack.mobile
+package com.alphastack.app
 
 import io.flutter.embedding.android.FlutterActivity
 

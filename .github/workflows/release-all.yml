@@ -1,0 +1,266 @@
+###############################################################################
+# AlphaStack — Unified Release Pipeline
+# Trigger: push a tag matching v* (e.g. v0.2.0)
+# Builds:  Android APK · Desktop (Win/Mac/Linux) · Web static export
+# Publishes a GitHub Release with every artifact attached.
+###############################################################################
+name: "🚀 Release All Platforms"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.0). Leave blank to use latest tag."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "20"
+  FLUTTER_VERSION: "3.24.0"
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+# ─── helpers ──────────────────────────────────────────────────────────────────
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # 1. Determine the version string from the tag
+  # ════════════════════════════════════════════════════════════════════════════
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"          # strip leading 'v'
+          echo "tag=$TAG"      >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "📌 Release $TAG (version $VERSION)"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 2. Android APK (Flutter)
+  # ════════════════════════════════════════════════════════════════════════════
+  build-android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Patch pubspec version
+        working-directory: apps/mobile
+        run: |
+          sed -i "s/^version: .*/version: ${{ needs.prepare.outputs.version }}+1/" pubspec.yaml
+          echo "📱 pubspec.yaml → $(grep '^version:' pubspec.yaml)"
+
+      - name: Flutter pub get
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: apps/mobile
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: |
+          cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk \
+             "AlphaStack-${{ needs.prepare.outputs.tag }}-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: "AlphaStack-${{ needs.prepare.outputs.tag }}-android.apk"
+          retention-days: 90
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 3. Desktop — Tauri (Windows · macOS · Linux)
+  # ════════════════════════════════════════════════════════════════════════════
+  build-desktop:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux
+            rust_target: ""
+          - os: macos-latest
+            target: macos
+            rust_target: ""
+          - os: windows-latest
+            target: windows
+            rust_target: ""
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      # ── system deps (Linux only) ──
+      - name: Install Linux dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libappindicator3-dev librsvg2-dev patchelf
+
+      # ── system deps (macOS only) ──
+      - name: Install macOS dependencies
+        if: matrix.target == 'macos'
+        run: brew install openssl
+
+      # ── patch desktop version ──
+      - name: Patch desktop version
+        working-directory: apps/desktop
+        run: |
+          # package.json
+          npm pkg set version="${{ needs.prepare.outputs.version }}"
+          # tauri.conf.json  (use jq for safety)
+          jq '.package.version = "${{ needs.prepare.outputs.version }}"' \
+            src-tauri/tauri.conf.json > /tmp/tauri.conf.json \
+            && mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
+          echo "🖥️  tauri.conf.json → $(jq -r .package.version src-tauri/tauri.conf.json)"
+
+      # ── build ──
+      - name: Install npm deps & build Tauri
+        working-directory: apps/desktop
+        run: |
+          npm install
+          npm run tauri build
+
+      # ── collect artifacts ──
+      - name: Collect installers
+        id: collect
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          find apps/desktop/src-tauri/target/release/bundle \
+            \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \
+               -o -name "*.AppImage" -o -name "*.deb" \) \
+            -exec cp {} release-artifacts/ \;
+          ls -lh release-artifacts/
+          echo "count=$(ls release-artifacts/ | wc -l)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: release-artifacts/*
+          retention-days: 90
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 4. Web App (Next.js static export)
+  # ════════════════════════════════════════════════════════════════════════════
+  build-web:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install & build
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package web build
+        run: |
+          tar czf "AlphaStack-${{ needs.prepare.outputs.tag }}-web.tar.gz" \
+            -C apps/web .next public package.json next.config.ts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-app
+          path: "AlphaStack-${{ needs.prepare.outputs.tag }}-web.tar.gz"
+          retention-days: 90
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 5. Publish GitHub Release
+  # ════════════════════════════════════════════════════════════════════════════
+  publish:
+    needs: [prepare, build-android, build-desktop, build-web]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts for release
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name "*.apk" -o -name "*.exe" -o -name "*.msi" \
+            -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \
+            -o -name "*.tar.gz" \) \
+            -exec cp {} release-files/ \;
+          echo "📦 Release files:"
+          ls -lh release-files/
+
+      - name: Generate checksums
+        working-directory: release-files
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: "AlphaStack ${{ needs.prepare.outputs.tag }}"
+          body: |
+            ## AlphaStack ${{ needs.prepare.outputs.tag }}
+
+            ### 📥 Downloads
+
+            | Platform | File |
+            |----------|------|
+            | 🤖 Android | `AlphaStack-${{ needs.prepare.outputs.tag }}-android.apk` |
+            | 🪟 Windows | `.exe` / `.msi` installer |
+            | 🍎 macOS | `.dmg` disk image |
+            | 🐧 Linux | `.AppImage` / `.deb` |
+            | 🌐 Web | `AlphaStack-*-web.tar.gz` (deploy to Vercel/Fly.io) |
+
+            ### 🔒 Checksums
+            See `SHA256SUMS.txt` for verification.
+
+            ### What's Changed
+            See [full changelog](https://github.com/${{ github.repository }}/commits/${{ needs.prepare.outputs.tag }}).
+          files: |
+            release-files/*
+          draft: false
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-rc') || contains(needs.prepare.outputs.tag, '-beta') || contains(needs.prepare.outputs.tag, '-alpha') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

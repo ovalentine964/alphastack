@@ -28,7 +28,7 @@ def ksAlias = System.getenv("KEY_ALIAS") ?: ""
 def ksKeyPass = System.getenv("KEY_PASSWORD") ?: ""
 
 android {
-    namespace "com.alphastack.mobile"
+    namespace "com.alphastack.app"
     compileSdk 34
     ndkVersion "25.1.8937393"
 
@@ -46,7 +46,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.alphastack.mobile"
+        applicationId "com.alphastack.app"
         minSdk 21
         targetSdk 34
         versionCode flutterVersionCode.toInteger()
