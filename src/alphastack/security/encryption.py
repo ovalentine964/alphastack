@@ -131,7 +131,7 @@ class EncryptionService:
         if self._current_version and self._current_version in self._keys:
             self._keys[self._current_version].status = KeyVersionStatus.GRACE
 
-        new_version = f"v{int(time.time())}"
+        new_version = f"v{int(time.time())}{os.urandom(2).hex()}"
         self._keys[new_version] = KeyVersion(
             version=new_version,
             key_material=os.urandom(_KEY_SIZE),

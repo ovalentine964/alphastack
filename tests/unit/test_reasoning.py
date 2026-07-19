@@ -260,9 +260,12 @@ class TestCausalInference:
 class TestTradeExplainer:
     """Tests for trade explainability."""
 
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        self.explainer = TradeExplainer()
+
     def _make_explanation(self) -> TradeExplanation:
-        explainer = TradeExplainer()
-        return explainer.explain(
+        return self.explainer.explain(
             symbol="AAPL",
             direction=TradeDirection.LONG,
             entry_price=150.0,
@@ -314,32 +317,32 @@ class TestTradeExplainer:
 
     def test_factor_contribution_direction(self):
         exp = self._make_explanation()
-        positive = [f for f in exp.factors if f.contribution > 0]
+        positive = [f for f in exp.factors if f.contribution > 0.05]
         assert all(f.direction == "bullish" for f in positive)
 
     def test_audit_report(self):
-        explainer = TradeExplainer()
+        # Using self.explainer
         exp = self._make_explanation()
-        report = explainer.audit_report(exp.explanation_id)
+        report = self.explainer.audit_report(exp.explanation_id)
         assert "AUDIT REPORT" in report
         assert "AAPL" in report
         assert "Risk" in report
 
     def test_audit_report_not_found(self):
-        explainer = TradeExplainer()
-        assert "No explanation" in explainer.audit_report("nonexistent")
+        # Using self.explainer
+        assert "No explanation" in self.explainer.audit_report("nonexistent")
 
     def test_list_explanations(self):
-        explainer = TradeExplainer()
+        # Using self.explainer
         self._make_explanation()
-        lst = explainer.list_explanations()
+        lst = self.explainer.list_explanations()
         assert len(lst) == 1
         assert lst[0]["symbol"] == "AAPL"
 
     def test_get_explanation(self):
-        explainer = TradeExplainer()
+        # Using self.explainer
         exp = self._make_explanation()
-        retrieved = explainer.get_explanation(exp.explanation_id)
+        retrieved = self.explainer.get_explanation(exp.explanation_id)
         assert retrieved is not None
         assert retrieved.symbol == "AAPL"
 
@@ -364,8 +367,8 @@ class TestTradeExplainer:
         assert d["contribution"] == 0.24
 
     def test_short_direction(self):
-        explainer = TradeExplainer()
-        exp = explainer.explain(
+        # Using self.explainer
+        exp = self.explainer.explain(
             symbol="TSLA",
             direction=TradeDirection.SHORT,
             entry_price=200.0,

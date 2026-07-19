@@ -171,3 +171,45 @@ async def get_config() -> ConfigResponse:
         risk_max_daily_loss_pct=settings.risk.max_daily_loss_pct,
         risk_max_open_positions=settings.risk.max_open_positions,
     )
+
+
+@router.get("/orchestrator/health")
+async def orchestrator_health():
+    """Orchestrator and agent health status."""
+    try:
+        from alphastack.api.rest.deps import get_orchestrator
+        orch = get_orchestrator()
+        if orch is None:
+            return {"status": "not_initialized"}
+        return orch.get_health()
+    except Exception as exc:
+        logger.warning("orchestrator_health_failed", error=str(exc))
+        return {"status": "error", "error": str(exc)}
+
+
+@router.post("/orchestrator/run")
+async def orchestrator_run(body: dict[str, Any]):
+    """Trigger an orchestrator pipeline run."""
+    try:
+        from alphastack.api.rest.deps import get_orchestrator
+        orch = get_orchestrator()
+        if orch is None:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"detail": "Orchestrator not initialized"},
+            )
+        symbol = body.get("symbol", "BTC/USDT")
+        timeframe = body.get("timeframe", "1h")
+        market_data = body.get("market_data", {})
+        result = await orch.run(
+            market_data=market_data,
+            symbol=symbol,
+            timeframe=timeframe,
+        )
+        return result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+    except Exception as exc:
+        logger.error("orchestrator_run_failed", error=str(exc), exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": str(exc)},
+        )

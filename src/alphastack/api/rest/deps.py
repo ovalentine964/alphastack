@@ -27,6 +27,8 @@ logger = get_logger(__name__)
 
 _registry: BrokerRegistry | None = None
 _event_bus: EventBus | None = None
+_orchestrator: Any | None = None
+_data_pipeline: Any | None = None
 
 
 def get_broker_registry() -> BrokerRegistry:
@@ -52,6 +54,28 @@ def set_event_bus(bus: EventBus | None) -> None:
     """Override the global event bus."""
     global _event_bus
     _event_bus = bus
+
+
+def get_orchestrator() -> Any | None:
+    """Return the global orchestrator instance."""
+    return _orchestrator
+
+
+def set_orchestrator(orch: Any) -> None:
+    """Set the global orchestrator instance."""
+    global _orchestrator
+    _orchestrator = orch
+
+
+def get_data_pipeline() -> Any | None:
+    """Return the global data pipeline instance."""
+    return _data_pipeline
+
+
+def set_data_pipeline(pipeline: Any) -> None:
+    """Set the global data pipeline instance."""
+    global _data_pipeline
+    _data_pipeline = pipeline
 
 
 # ---------------------------------------------------------------------------

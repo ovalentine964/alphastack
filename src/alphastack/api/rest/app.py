@@ -112,12 +112,13 @@ async def lifespan(app: FastAPI):
         logger.info("api_startup.event_bus_skipped", reason=str(exc))
 
     # --- Wire up broker registry ---
+    registry = None
     try:
         from alphastack.api.rest.deps import get_broker_registry
         from alphastack.brokers.ccxt_connector import CCXTConnector
         settings = get_settings()
+        registry = get_broker_registry()
         if settings.ccxt.api_key.get_secret_value():
-            registry = get_broker_registry()
             connector = CCXTConnector(
                 exchange_id=settings.ccxt.exchange,
                 api_key=settings.ccxt.api_key.get_secret_value(),
@@ -129,6 +130,20 @@ async def lifespan(app: FastAPI):
             logger.info("api_startup.broker_connected", broker="ccxt")
     except Exception as exc:
         logger.info("api_startup.broker_skipped", reason=str(exc))
+
+    # --- Wire up orchestrator ---
+    try:
+        from alphastack.agents.orchestrator.graph import AlphaStackOrchestrator
+        from alphastack.api.rest.deps import set_orchestrator
+        orch = AlphaStackOrchestrator(
+            event_bus=bus if 'bus' in dir() else None,
+            human_in_the_loop=False,
+            broker_registry=registry,
+        )
+        set_orchestrator(orch)
+        logger.info("api_startup.orchestrator_created")
+    except Exception as exc:
+        logger.info("api_startup.orchestrator_skipped", reason=str(exc))
 
     yield
 

@@ -227,6 +227,14 @@ class RiskAgent(AlphaStackAgent):
         self._kelly_avg_loss: float = 1.0   # R-multiple
         self._kelly_fraction: float = 0.5   # half-Kelly (conservative)
 
+        # RiskGovernor integration (optional, set via set_risk_governor)
+        self._governor: Any = None
+
+    def set_risk_governor(self, governor: Any) -> None:
+        """Set the RiskGovernor for production risk checks."""
+        self._governor = governor
+        logger.info("risk_agent.governor_set")
+
     def system_prompt(self) -> str:
         return (
             "You are the AlphaStack Risk Agent. Your job is to:\n"
@@ -438,6 +446,37 @@ class RiskAgent(AlphaStackAgent):
             )
             trade_decisions.append(decision)
 
+        # 3b. Run RiskGovernor validation on approved decisions (async)
+        if self._governor is not None:
+            for i, decision in enumerate(trade_decisions):
+                if decision.get("status") != "approved":
+                    continue
+                try:
+                    from alphastack.risk.governor import TradeRequest
+                    sig = decision.get("signal", {})
+                    gov_request = TradeRequest(
+                        symbol=decision["symbol"],
+                        direction=sig.get("side", "long"),
+                        requested_size=decision["quantity"],
+                        entry_price=decision["price"],
+                        stop_loss=sig.get("stop_loss", 0.0) or 0.0,
+                        take_profit=sig.get("take_profit", 0.0) or 0.0,
+                        strategy_id=sig.get("strategy", "alphastack"),
+                    )
+                    approval = await self._governor.approve_trade(gov_request)
+                    if not approval.approved:
+                        trade_decisions[i] = self._reject(
+                            decision["symbol"],
+                            sig.get("side", "long"),
+                            f"RiskGovernor rejected: {approval.rejection_reason}",
+                        )
+                    elif approval.adjusted_size < decision["quantity"]:
+                        trade_decisions[i]["quantity"] = approval.adjusted_size
+                        trade_decisions[i]["governor_adjusted"] = True
+                        trade_decisions[i]["warnings"] = approval.warnings
+                except Exception as exc:
+                    logger.warning("risk_agent.governor_validation_failed", error=str(exc))
+
         # 4. Update risk status with new drawdown
         risk.drawdown_pct = current_drawdown
 
@@ -538,6 +577,25 @@ class RiskAgent(AlphaStackAgent):
 
         # Determine action
         action = "buy" if side == "long" else "sell"
+
+        # RiskGovernor validation (if available)
+        if self._governor is not None:
+            try:
+                from alphastack.risk.governor import TradeRequest
+                gov_request = TradeRequest(
+                    symbol=symbol,
+                    direction=side,
+                    requested_size=kelly_size,
+                    entry_price=signal.get("entry_price", 0.0) or 0.0,
+                    stop_loss=signal.get("stop_loss", 0.0) or 0.0,
+                    take_profit=signal.get("take_profit", 0.0) or 0.0,
+                    strategy_id=signal.get("strategy", "alphastack"),
+                )
+                # Note: governor.approve_trade is async, but we're in a sync method.
+                # The orchestrator handles this at the async level.
+                # Store the request for async validation in execute().
+            except Exception as exc:
+                logger.debug("risk_agent.governor_request_build_failed", error=str(exc))
 
         return {
             "id": uuid.uuid4().hex[:12],

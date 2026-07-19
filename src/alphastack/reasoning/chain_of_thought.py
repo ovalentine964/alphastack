@@ -223,7 +223,10 @@ class ChainOfThought:
                 elif value > 70:
                     bearish_count += 1
             elif "macd" in name.lower():
-                bullish_count += 1 if value > 0 else bearish_count + 1  # type: ignore[assignment]
+                if value > 0:
+                    bullish_count += 1
+                else:
+                    bearish_count += 1
             elif "sma" in name.lower() or "ema" in name.lower():
                 if value > price:
                     bearish_count += 1  # price below MA

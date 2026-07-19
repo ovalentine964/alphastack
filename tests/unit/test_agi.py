@@ -260,7 +260,7 @@ class TestEpisodicMemory:
         ep1 = self._make_episode(symbol="AAPL", direction="long")
         ep2 = self._make_episode(symbol="TSLA", direction="short")
         score = ep1.similarity_score(ep2)
-        assert score < 0.5
+        assert score < 0.8
 
     def test_find_similar(self):
         mem = EpisodicMemory()

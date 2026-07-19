@@ -70,12 +70,12 @@ except ImportError:
 
 from alphastack.agents.debate.debate_engine import DebateEngine
 from alphastack.agents.debate.risk_arbiter import DebateVerdict
-from alphastack.agents.execution.agent import ExecutionAgent
+from alphastack.agents.execution_agent import ExecutionAgent
 from alphastack.agents.news.agent import NewsAgent
 from alphastack.agents.orchestrator.state import AlphaStackState
-from alphastack.agents.reflection.agent import ReflectionAgent
-from alphastack.agents.risk.agent import RiskAgent
-from alphastack.agents.strategy.agent import StrategyAgent
+from alphastack.agents.reflection_agent import ReflectionAgent
+from alphastack.agents.risk_agent import RiskAgent
+from alphastack.agents.strategy_agent import StrategyAgent
 from alphastack.agents.base import CircuitBreaker
 from alphastack.utils.logger import get_logger
 
@@ -122,11 +122,15 @@ class AlphaStackOrchestrator:
         checkpointer: Any | None = None,
         human_in_the_loop: bool = True,
         hitl_threshold: float = 0.6,
+        broker_registry: Any | None = None,
+        data_pipeline: Any | None = None,
     ) -> None:
         self.event_bus = event_bus
         self.checkpointer = checkpointer
         self.human_in_the_loop = human_in_the_loop
         self.hitl_threshold = hitl_threshold
+        self.broker_registry = broker_registry
+        self.data_pipeline = data_pipeline
 
         # Instantiate agents (with production features from v2.0 base)
         self.strategy_agent = StrategyAgent(event_bus=event_bus)
@@ -135,6 +139,19 @@ class AlphaStackOrchestrator:
         self.news_agent = NewsAgent(event_bus=event_bus)
         self.execution_agent = ExecutionAgent(event_bus=event_bus)
         self.reflection_agent = ReflectionAgent(event_bus=event_bus)
+
+        # Wire broker registry into execution agent
+        if broker_registry is not None:
+            self.execution_agent.set_broker_registry(broker_registry)
+
+        # Wire SmartOrderRouter if available
+        try:
+            from alphastack.brokers.router import SmartOrderRouter
+            if broker_registry is not None:
+                self._smart_router = SmartOrderRouter(broker_registry)
+                self.execution_agent.set_smart_router(self._smart_router)
+        except Exception:
+            self._smart_router = None
 
         # Orchestrator-level circuit breaker
         self.orchestrator_cb = CircuitBreaker(
@@ -594,6 +611,13 @@ class AlphaStackOrchestrator:
         AlphaStackState
             The final state after all agents have run.
         """
+        # Auto-fetch market data from DataPipeline if available
+        if not market_data and self.data_pipeline is not None:
+            try:
+                market_data = self.data_pipeline.get_market_snapshot(symbol)
+                logger.info("orchestrator.auto_fetched_data", symbol=symbol)
+            except Exception as exc:
+                logger.warning("orchestrator.auto_fetch_failed", error=str(exc))
         # Check orchestrator-level circuit breaker
         if not self.orchestrator_cb.allow_request():
             logger.error("orchestrator.circuit_breaker_open")

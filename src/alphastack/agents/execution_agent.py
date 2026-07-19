@@ -380,6 +380,8 @@ class ExecutionAgent(AlphaStackAgent):
         )
         self._broker_registry: dict[str, Any] = {}
         self._slippage_tracker = SlippageTracker()
+        self._registry: Any = None  # BrokerRegistry instance
+        self._router: Any = None    # SmartOrderRouter instance
 
     def system_prompt(self) -> str:
         return (
@@ -395,6 +397,20 @@ class ExecutionAgent(AlphaStackAgent):
         """Register a broker connector for order routing."""
         self._broker_registry[name] = connector
         logger.info("execution_agent.broker_registered", broker=name)
+
+    def set_broker_registry(self, registry: Any) -> None:
+        """Set the BrokerRegistry for smart order routing."""
+        self._registry = registry
+        for name in registry.names:
+            connector = registry.get(name)
+            if connector:
+                self._broker_registry[name] = connector
+        logger.info("execution_agent.registry_set", brokers=registry.names)
+
+    def set_smart_router(self, router: Any) -> None:
+        """Set the SmartOrderRouter for best-execution routing."""
+        self._router = router
+        logger.info("execution_agent.router_set")
 
     # ------------------------------------------------------------------
     # Algorithm selection
@@ -509,8 +525,33 @@ class ExecutionAgent(AlphaStackAgent):
                 reason="hold action — no execution needed",
             )
 
-        # Select broker
+        # Select broker — prefer SmartOrderRouter, fallback to heuristic
         broker_name = broker or self._select_broker(symbol)
+
+        # Try SmartOrderRouter for best execution if no explicit broker
+        if self._router and not broker:
+            try:
+                from alphastack.brokers.models import BrokerOrder, OrderSide, OrderType as BOrderType
+                side_enum = OrderSide.BUY if action == "buy" else OrderSide.SELL
+                ot_enum = BOrderType.LIMIT if order_type == "limit" else BOrderType.MARKET
+                broker_order = BrokerOrder(
+                    symbol=symbol,
+                    side=side_enum,
+                    order_type=ot_enum,
+                    quantity=quantity,
+                    price=price if order_type != "market" else None,
+                )
+                quality = await self._router.estimate_cost(broker_order)
+                broker_name = quality.broker
+                logger.info(
+                    "execution_agent.smart_routing",
+                    symbol=symbol,
+                    selected_broker=broker_name,
+                    total_score=round(quality.total_score, 3),
+                )
+            except Exception as exc:
+                logger.debug("execution_agent.smart_router_fallback", error=str(exc))
+
         connector = self._broker_registry.get(broker_name)
 
         if connector is None:

@@ -256,6 +256,7 @@ class JWTManager:
         payload = {
             "sub": user_id,
             "iss": self._issuer,
+            "aud": self._audience,
             "iat": now,
             "exp": now + 300,  # 5 minutes
             "type": "partial",

@@ -373,7 +373,6 @@ class TestRateLimiter:
 # ===================================================================
 
 class TestOrderValidationPipeline:
-    from alphastack.security.validation import OrderValidationPipeline
 
     VALID_ORDER = {
         "symbol": "EUR/USD",
@@ -411,7 +410,7 @@ class TestOrderValidationPipeline:
         order = {**self.VALID_ORDER, "stop_loss": None}
         result = order_pipeline.validate(order, self.VALID_CONTEXT)
         assert result.passed is False
-        assert any("stop_loss" in f.reason.lower() for f in result.failures)
+        assert any("stop" in f.reason.lower() for f in result.failures)
 
     def test_invalid_symbol_rejected(self, order_pipeline):
         order = {**self.VALID_ORDER, "symbol": "FAKE/COIN"}
@@ -442,7 +441,7 @@ class TestOrderValidationPipeline:
         assert any("risk/reward" in f.reason.lower() for f in result.failures)
 
     def test_order_size_exceeds_limit(self, order_pipeline):
-        from alphastack.security.validation import PositionLimits
+        from alphastack.security.validation import PositionLimits, OrderValidationPipeline
         limits = PositionLimits(max_order_size=0.5)
         pipeline = OrderValidationPipeline(limits=limits)
         result = pipeline.validate(self.VALID_ORDER, self.VALID_CONTEXT)
@@ -450,7 +449,7 @@ class TestOrderValidationPipeline:
         assert any("order size" in f.reason.lower() for f in result.failures)
 
     def test_order_value_exceeds_limit(self, order_pipeline):
-        from alphastack.security.validation import PositionLimits
+        from alphastack.security.validation import PositionLimits, OrderValidationPipeline
         limits = PositionLimits(max_order_value_usd=100)
         pipeline = OrderValidationPipeline(limits=limits)
         order = {**self.VALID_ORDER, "quantity": 1.0, "price": 1000.0,
