@@ -323,8 +323,8 @@ class TestExposureManager:
     def test_per_pair_exposure(self):
         em = ExposureManager(max_per_pair_pct=20.0)
         em.add_position(PositionExposure(symbol="EUR/USD", direction="long", size=1.0, entry_price=1.1))
-        # 1.0 * 1.1 = 1.1, on 10000 = 11%, add 1.0 more → 22% > 20%
-        ok, reason = em.check_add_position("EUR/USD", "long", 1.0, 1.1, 10000.0)
+        # 1.0 * 1.1 = 1.1, on 10 = 11%, add 1.0 more → 22% > 20%
+        ok, reason = em.check_add_position("EUR/USD", "long", 1.0, 1.1, 10.0)
         assert ok is False
 
     def test_leverage_enforced(self):

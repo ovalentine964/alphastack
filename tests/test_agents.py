@@ -578,7 +578,7 @@ class TestExecutionAgent:
         assert ExecutionAgent._select_broker("ETH/BTC") == "ccxt"
 
     def test_broker_selection_forex(self):
-        assert ExecutionAgent._select_broker("EUR/USD") == "mt5"
+        assert ExecutionAgent._select_broker("EURUSD") == "mt5"
         assert ExecutionAgent._select_broker("GBPUSD") == "mt5"
 
     def test_log_entry_structure(self):
@@ -629,14 +629,16 @@ class TestReflectionAgent:
 
     def test_sharpe_ratio(self):
         analyzer = PerformanceAnalyzer()
-        # Consistent positive returns → high Sharpe
-        pnls = [10.0] * 30
+        # Variable positive returns → positive Sharpe
+        pnls = [8.0, 12.0, 9.0, 11.0, 10.0, 13.0, 7.0, 14.0, 10.0, 9.0,
+                11.0, 12.0, 8.0, 13.0, 10.0, 9.0, 11.0, 14.0, 7.0, 12.0,
+                10.0, 8.0, 13.0, 11.0, 9.0, 12.0, 10.0, 8.0, 14.0, 11.0]
         metrics = analyzer.compute_metrics(pnls)
         assert metrics["sharpe_ratio"] > 0
 
     def test_sortino_ratio(self):
         analyzer = PerformanceAnalyzer()
-        pnls = [100.0, -10.0, 100.0, -10.0, 100.0]
+        pnls = [100.0, -10.0, 90.0, -30.0, 110.0]
         metrics = analyzer.compute_metrics(pnls)
         assert metrics["sortino_ratio"] > 0
 

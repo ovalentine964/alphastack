@@ -44,7 +44,7 @@ class TestMockBrokerConnector:
         balance = await broker.get_balance()
         assert isinstance(balance, BrokerBalance)
         assert balance.equity == 10_000.0
-        assert balance.free == 10_000.0
+        assert balance.available == 10_000.0
 
     @pytest.mark.asyncio
     async def test_place_order(self) -> None:
@@ -78,15 +78,15 @@ class TestMockBrokerConnector:
         )
         placed = await broker.place_order(order)
         cancelled = await broker.cancel_order(placed.id)
-        assert cancelled is True
+        assert cancelled.status == OrderStatus.CANCELLED
         assert broker._orders[placed.id].status == OrderStatus.CANCELLED
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_order(self) -> None:
         broker = MockBrokerConnector()
         await broker.connect()
-        result = await broker.cancel_order("nonexistent")
-        assert result is False
+        with pytest.raises(ValueError, match="not found"):
+            await broker.cancel_order("nonexistent")
 
     @pytest.mark.asyncio
     async def test_get_tick(self) -> None:

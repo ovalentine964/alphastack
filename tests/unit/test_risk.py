@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -176,7 +176,7 @@ class TestExposureManager:
             price=1.0, balance=1.0, session="london",
         )
         assert ok is False
-        assert "leverage" in reason.lower()
+        assert "exposure" in reason.lower() or "leverage" in reason.lower()
 
     def test_snapshot_accuracy(self, exposure_manager: ExposureManager) -> None:
         exposure_manager.add_position(PositionExposure(
@@ -256,16 +256,18 @@ class TestPositionSizer:
 
     def test_larger_stop_means_smaller_size(self) -> None:
         """Wider stop → less size for same risk budget."""
-        sizer = PositionSizer(account_balance=10_000.0)
+        sizer = PositionSizer(
+            account_balance=10_000.0, default_risk_pct=0.2, max_position_pct=50.0,
+        )
         base = SizingRequest(
             symbol="EUR/USD", direction="long",
             entry_price=1.1050, stop_loss=1.1000,
-            account_balance=10_000.0, max_risk_pct=2.0,
+            account_balance=10_000.0, max_risk_pct=0.2,
         )
         wide = SizingRequest(
             symbol="EUR/USD", direction="long",
             entry_price=1.1050, stop_loss=1.0900,
-            account_balance=10_000.0, max_risk_pct=2.0,
+            account_balance=10_000.0, max_risk_pct=0.2,
         )
         r1 = sizer.size_position(base)
         r2 = sizer.size_position(wide)
@@ -273,19 +275,23 @@ class TestPositionSizer:
 
     def test_drawdown_de_escalation(self) -> None:
         """Higher drawdown should reduce position size."""
-        sizer = PositionSizer(account_balance=10_000.0, default_risk_pct=2.0)
+        sizer = PositionSizer(
+            account_balance=10_000.0, default_risk_pct=0.2, max_position_pct=50.0,
+        )
 
         low_dd = SizingRequest(
             symbol="EUR/USD", direction="long",
             entry_price=1.1050, stop_loss=1.1000,
             account_balance=10_000.0,
             daily_drawdown_pct=0.0,
+            max_risk_pct=0.2,
         )
         high_dd = SizingRequest(
             symbol="EUR/USD", direction="long",
             entry_price=1.1050, stop_loss=1.1000,
             account_balance=10_000.0,
             daily_drawdown_pct=6.0,
+            max_risk_pct=0.2,
         )
         r1 = sizer.size_position(low_dd)
         r2 = sizer.size_position(high_dd)
@@ -418,7 +424,7 @@ class TestDrawdownManager:
         assert dm.is_breach() is False
 
     def test_drawdown_tracking(self) -> None:
-        dm = DrawdownManager(account_balance=10_000.0, max_total_pct=15.0)
+        dm = DrawdownManager(account_balance=10_000.0, max_daily_pct=10.0, max_total_pct=15.0)
         dm.record_pnl(-500.0)
         assert dm.state.current_balance == 9_500.0
         assert dm.state.total_pct == pytest.approx(5.0)

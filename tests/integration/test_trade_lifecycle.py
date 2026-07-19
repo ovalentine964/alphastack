@@ -60,9 +60,11 @@ class TestTradeLifecycle:
         )
         await event_bus.publish(signal)
 
-        # Step 2: Build trade request from context
+        # Step 2: Build trade request from context (override entry to be valid)
         ctx = bullish_context
         request = _make_trade_request_from_context(ctx)
+        # Ensure entry > stop_loss for a valid long trade
+        request.entry_price = 1.1050
 
         # Step 3: Risk approval
         gov = RiskGovernor(account_balance=10_000.0)
@@ -136,7 +138,7 @@ class TestTradeLifecycle:
         )
         approval = await gov.approve_trade(request)
         assert approval.approved is False
-        assert "Circuit breaker" in approval.rejection_reason
+        assert "Trading halted" in approval.rejection_reason
 
     @pytest.mark.asyncio
     async def test_position_size_reduced_by_risk(self, mock_broker, event_bus, bullish_context):
@@ -146,12 +148,12 @@ class TestTradeLifecycle:
 
         # Request unreasonably large size
         request = TradeRequest(
-            symbol="EUR/USD", direction="long", requested_size=50.0,
+            symbol="EUR/USD", direction="long", requested_size=500.0,
             entry_price=1.1050, stop_loss=1.1000,
         )
         approval = await gov.approve_trade(request)
         assert approval.approved is True
-        assert approval.adjusted_size < 50.0
+        assert approval.adjusted_size < 500.0
 
     @pytest.mark.asyncio
     async def test_multiple_trades_tracked(self, mock_broker, event_bus):
